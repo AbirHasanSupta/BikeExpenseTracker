@@ -32,6 +32,7 @@ const initSchema = (db) => {
       odometer REAL NOT NULL,
       station_name TEXT,
       notes TEXT,
+      ride_tag TEXT DEFAULT 'personal',
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
@@ -43,6 +44,7 @@ const initSchema = (db) => {
       category TEXT NOT NULL,
       cost REAL NOT NULL,
       notes TEXT,
+      ride_tag TEXT DEFAULT 'personal',
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
@@ -54,6 +56,21 @@ const initSchema = (db) => {
       default_bike_id INTEGER DEFAULT 1
     );
   `);
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS service_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bike_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      interval_km REAL NOT NULL,
+      last_service_km REAL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Migrations: add columns if they don't exist
+  try { db.execSync(`ALTER TABLE fuel_logs ADD COLUMN ride_tag TEXT DEFAULT 'personal';`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE expenses ADD COLUMN ride_tag TEXT DEFAULT 'personal';`); } catch (_) {}
 
   const bikeCount = db.getFirstSync('SELECT COUNT(*) as cnt FROM bikes');
   if (bikeCount.cnt === 0) {
@@ -65,16 +82,23 @@ const initSchema = (db) => {
   }
 };
 
+// ─── Settings ────────────────────────────────────────────────────────────────
+
 export const getSettings = () => {
   return getDb().getFirstSync('SELECT * FROM settings LIMIT 1') || { fuel_price: 108, currency: 'BDT', default_bike_id: 1 };
 };
 
-export const updateSettings = (fuelPrice, currency) => {
-  getDb().runSync('UPDATE settings SET fuel_price = ?, currency = ?', [fuelPrice, currency]);
+export const updateSettings = (fuelPrice, currency, defaultBikeId) => {
+  getDb().runSync(
+    'UPDATE settings SET fuel_price = ?, currency = ?, default_bike_id = ?',
+    [fuelPrice, currency, defaultBikeId || 1]
+  );
 };
 
+// ─── Bikes ────────────────────────────────────────────────────────────────────
+
 export const getBikes = () => {
-  return getDb().getAllSync('SELECT * FROM bikes ORDER BY created_at DESC');
+  return getDb().getAllSync('SELECT * FROM bikes ORDER BY created_at ASC');
 };
 
 export const addBike = (bikeName, tankCapacity, notes) => {
@@ -85,11 +109,30 @@ export const addBike = (bikeName, tankCapacity, notes) => {
   return result.lastInsertRowId;
 };
 
-export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odometer, stationName, notes }) => {
+export const deleteBike = (id) => {
+  const db = getDb();
+  db.runSync('DELETE FROM bikes WHERE id = ?', [id]);
+  db.runSync('DELETE FROM fuel_logs WHERE bike_id = ?', [id]);
+  db.runSync('DELETE FROM expenses WHERE bike_id = ?', [id]);
+  db.runSync('DELETE FROM service_reminders WHERE bike_id = ?', [id]);
+};
+
+export const setDefaultBike = (bikeId) => {
+  getDb().runSync('UPDATE settings SET default_bike_id = ?', [bikeId]);
+};
+
+export const getDefaultBikeId = () => {
+  const s = getSettings();
+  return s.default_bike_id || 1;
+};
+
+// ─── Fuel Logs ────────────────────────────────────────────────────────────────
+
+export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag }) => {
   const result = getDb().runSync(
-    `INSERT INTO fuel_logs (bike_id, date, litres, price_per_litre, total_cost, odometer, station_name, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [bikeId || 1, date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '']
+    `INSERT INTO fuel_logs (bike_id, date, litres, price_per_litre, total_cost, odometer, station_name, notes, ride_tag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [bikeId || 1, date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal']
   );
   return result.lastInsertRowId;
 };
@@ -120,10 +163,41 @@ export const deleteFuelLog = (id) => {
   getDb().runSync('DELETE FROM fuel_logs WHERE id = ?', [id]);
 };
 
-export const addExpense = ({ bikeId, date, category, cost, notes }) => {
+// ─── Station Mileage Tracking ─────────────────────────────────────────────────
+
+export const getStationStats = (bikeId = 1) => {
+  const db = getDb();
+  // Get all fills with station names, ordered by odometer
+  const logs = db.getAllSync(
+    `SELECT * FROM fuel_logs WHERE bike_id = ? AND station_name != '' ORDER BY odometer ASC`,
+    [bikeId]
+  );
+
+  const stationMap = {};
+  for (let i = 1; i < logs.length; i++) {
+    const prev = logs[i - 1];
+    const curr = logs[i];
+    const dist = curr.odometer - prev.odometer;
+    const mileage = curr.litres > 0 ? dist / curr.litres : 0;
+    if (mileage > 5 && mileage < 120) { // sanity filter
+      const name = curr.station_name;
+      if (!stationMap[name]) stationMap[name] = { name, fills: 0, totalMileage: 0, avgMileage: 0 };
+      stationMap[name].fills++;
+      stationMap[name].totalMileage += mileage;
+    }
+  }
+  return Object.values(stationMap).map(s => ({
+    ...s,
+    avgMileage: s.fills > 0 ? s.totalMileage / s.fills : 0,
+  })).sort((a, b) => b.avgMileage - a.avgMileage);
+};
+
+// ─── Expenses ─────────────────────────────────────────────────────────────────
+
+export const addExpense = ({ bikeId, date, category, cost, notes, rideTag }) => {
   const result = getDb().runSync(
-    'INSERT INTO expenses (bike_id, date, category, cost, notes) VALUES (?, ?, ?, ?, ?)',
-    [bikeId || 1, date, category, cost, notes || '']
+    'INSERT INTO expenses (bike_id, date, category, cost, notes, ride_tag) VALUES (?, ?, ?, ?, ?, ?)',
+    [bikeId || 1, date, category, cost, notes || '', rideTag || 'personal']
   );
   return result.lastInsertRowId;
 };
@@ -138,6 +212,33 @@ export const getExpenses = (bikeId = 1, limit = 100) => {
 export const deleteExpense = (id) => {
   getDb().runSync('DELETE FROM expenses WHERE id = ?', [id]);
 };
+
+// ─── Service Reminders ────────────────────────────────────────────────────────
+
+export const getServiceReminders = (bikeId = 1) => {
+  return getDb().getAllSync(
+    'SELECT * FROM service_reminders WHERE bike_id = ? ORDER BY created_at ASC',
+    [bikeId]
+  );
+};
+
+export const addServiceReminder = ({ bikeId, title, intervalKm, lastServiceKm, notes }) => {
+  const result = getDb().runSync(
+    'INSERT INTO service_reminders (bike_id, title, interval_km, last_service_km, notes) VALUES (?, ?, ?, ?, ?)',
+    [bikeId || 1, title, intervalKm, lastServiceKm || 0, notes || '']
+  );
+  return result.lastInsertRowId;
+};
+
+export const updateReminderServiceKm = (id, newKm) => {
+  getDb().runSync('UPDATE service_reminders SET last_service_km = ? WHERE id = ?', [newKm, id]);
+};
+
+export const deleteServiceReminder = (id) => {
+  getDb().runSync('DELETE FROM service_reminders WHERE id = ?', [id]);
+};
+
+// ─── Monthly Stats ────────────────────────────────────────────────────────────
 
 export const getMonthlyStats = (bikeId = 1, year, month) => {
   const db = getDb();
@@ -163,4 +264,51 @@ export const getMonthlyStats = (bikeId = 1, year, month) => {
   const costPerKm = distance > 0 ? (totalFuelCost + totalMaintenance) / distance : 0;
 
   return { totalFuelCost, totalMaintenance, totalCost: totalFuelCost + totalMaintenance, totalLitres, distance, mileage, costPerKm };
+};
+
+// ─── Tag Stats ────────────────────────────────────────────────────────────────
+
+export const getTagStats = (bikeId = 1, year, month) => {
+  const db = getDb();
+  const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+
+  const fuelByTag = db.getAllSync(
+    `SELECT ride_tag, SUM(total_cost) as cost, SUM(litres) as litres
+     FROM fuel_logs WHERE bike_id = ? AND date LIKE ?
+     GROUP BY ride_tag`,
+    [bikeId, `${monthStr}%`]
+  );
+  const expByTag = db.getAllSync(
+    `SELECT ride_tag, SUM(cost) as cost
+     FROM expenses WHERE bike_id = ? AND date LIKE ?
+     GROUP BY ride_tag`,
+    [bikeId, `${monthStr}%`]
+  );
+
+  const tags = {};
+  for (const row of fuelByTag) {
+    if (!tags[row.ride_tag]) tags[row.ride_tag] = { tag: row.ride_tag, fuelCost: 0, expCost: 0, litres: 0 };
+    tags[row.ride_tag].fuelCost += row.cost || 0;
+    tags[row.ride_tag].litres += row.litres || 0;
+  }
+  for (const row of expByTag) {
+    if (!tags[row.ride_tag]) tags[row.ride_tag] = { tag: row.ride_tag, fuelCost: 0, expCost: 0, litres: 0 };
+    tags[row.ride_tag].expCost += row.cost || 0;
+  }
+  return Object.values(tags).map(t => ({ ...t, totalCost: t.fuelCost + t.expCost }));
+};
+
+// ─── Export CSV ───────────────────────────────────────────────────────────────
+
+export const getAllDataForExport = (bikeId = 1) => {
+  const db = getDb();
+  const fuelLogs = db.getAllSync(
+    'SELECT * FROM fuel_logs WHERE bike_id = ? ORDER BY date DESC',
+    [bikeId]
+  );
+  const expenses = db.getAllSync(
+    'SELECT * FROM expenses WHERE bike_id = ? ORDER BY date DESC',
+    [bikeId]
+  );
+  return { fuelLogs, expenses };
 };

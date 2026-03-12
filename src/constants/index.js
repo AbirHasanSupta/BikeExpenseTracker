@@ -12,6 +12,7 @@ export const COLORS = {
   accentGreen: '#4CAF50',
   accentRed: '#FF4757',
   accentBlue: '#2196F3',
+  accentPurple: '#9C27B0',
   text: '#FFFFFF',
   textSecondary: '#A8B2C4',
   textMuted: '#6B7A8D',
@@ -36,8 +37,19 @@ export const EXPENSE_CATEGORIES = [
   { label: 'Others', value: 'others', icon: 'dots-horizontal', color: '#9E9E9E' },
 ];
 
+export const RIDE_TAGS = [
+  { label: 'Personal', value: 'personal', icon: 'account', color: '#2196F3' },
+  { label: 'Office', value: 'office', icon: 'briefcase', color: '#FF9800' },
+  { label: 'Travel', value: 'travel', icon: 'map-marker-radius', color: '#4CAF50' },
+  { label: 'Other', value: 'other', icon: 'dots-horizontal', color: '#9E9E9E' },
+];
+
 export const getCategoryInfo = (value) => {
   return EXPENSE_CATEGORIES.find(c => c.value === value) || EXPENSE_CATEGORIES[EXPENSE_CATEGORIES.length - 1];
+};
+
+export const getRideTagInfo = (value) => {
+  return RIDE_TAGS.find(t => t.value === value) || RIDE_TAGS[0];
 };
 
 export const MONTHS = [

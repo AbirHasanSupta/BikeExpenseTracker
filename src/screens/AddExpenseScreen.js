@@ -1,20 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { addExpense, getSettings } from '../database/db';
-import { COLORS, EXPENSE_CATEGORIES, getTodayString, formatCurrency } from '../constants';
+import { addExpense, getSettings, getDefaultBikeId } from '../database/db';
+import { COLORS, EXPENSE_CATEGORIES, RIDE_TAGS, getTodayString, formatCurrency } from '../constants';
 
 export default function AddExpenseScreen({ navigation }) {
   const [date, setDate] = useState(getTodayString());
+  const [dateObj, setDateObj] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [category, setCategory] = useState(null);
   const [cost, setCost] = useState('');
   const [notes, setNotes] = useState('');
+  const [rideTag, setRideTag] = useState('personal');
   const [settings, setSettings] = useState({ currency: 'BDT' });
   const [saving, setSaving] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [bikeId, setBikeId] = useState(1);
 
-  useEffect(() => { setSettings(getSettings()); }, []);
+  useEffect(() => {
+    setSettings(getSettings());
+    setBikeId(getDefaultBikeId());
+  }, []);
 
   const selectedCat = EXPENSE_CATEGORIES.find(c => c.value === category);
 
@@ -23,7 +29,7 @@ export default function AddExpenseScreen({ navigation }) {
     if (!cost || parseFloat(cost) <= 0) { Alert.alert('Enter Cost', 'Please enter a valid cost.'); return; }
     try {
       setSaving(true);
-      addExpense({ bikeId: 1, date, category, cost: parseFloat(cost), notes });
+      addExpense({ bikeId, date, category, cost: parseFloat(cost), notes, rideTag });
       Alert.alert('Saved!', 'Expense added successfully.', [
         { text: 'Add Another', onPress: () => { setCategory(null); setCost(''); setNotes(''); setSaving(false); } },
         { text: 'Done', onPress: () => navigation.goBack() },
@@ -63,22 +69,57 @@ export default function AddExpenseScreen({ navigation }) {
           <TouchableOpacity style={styles.inputWrapper} onPress={() => setShowDatePicker(true)}>
             <MaterialCommunityIcons name="calendar" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
             <View style={[styles.input, { paddingLeft: 40, justifyContent: 'center' }]}>
-              <Text style={{ color: COLORS.text, fontSize: 15 }}>{date}</Text>
+              <Text style={{ fontSize: 15, color: COLORS.text }}>{date}</Text>
             </View>
+            <MaterialCommunityIcons name="chevron-down" size={18} color={COLORS.textMuted} style={styles.inputIconRight} />
           </TouchableOpacity>
         </View>
 
-        {showDatePicker && (
+        {showDatePicker && Platform.OS === 'android' && (
           <DateTimePicker
-            value={new Date(date)}
+            value={dateObj}
             mode="date"
-            display="default"
+            display="calendar"
             onChange={(event, selectedDate) => {
               setShowDatePicker(false);
-              if (selectedDate) setDate(selectedDate.toISOString().split('T')[0]);
+              if (event.type === 'set' && selectedDate) {
+                setDateObj(selectedDate);
+                setDate(`${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`);
+              }
             }}
           />
         )}
+
+        {showDatePicker && Platform.OS === 'ios' && (
+          <Modal transparent animationType="slide" visible={showDatePicker}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalSheet}>
+                <View style={styles.modalHeader}>
+                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                    <Text style={styles.modalCancel}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.modalTitle}>Select Date</Text>
+                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                    <Text style={styles.modalDone}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={dateObj}
+                  mode="date"
+                  display="inline"
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setDateObj(selectedDate);
+                      setDate(`${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`);
+                    }
+                  }}
+                  style={{ alignSelf: 'center' }}
+                />
+              </View>
+            </View>
+          </Modal>
+        )}
+
 
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Cost ({settings.currency}) <Text style={{ color: COLORS.primary }}>*</Text></Text>
@@ -93,6 +134,23 @@ export default function AddExpenseScreen({ navigation }) {
           <View style={styles.inputWrapper}>
             <MaterialCommunityIcons name="note-text" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
             <TextInput style={[styles.input, { paddingLeft: 40 }]} value={notes} onChangeText={setNotes} placeholder="Any notes..." placeholderTextColor={COLORS.textMuted} />
+          </View>
+        </View>
+
+        {/* Ride Tag */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Ride Tag</Text>
+          <View style={styles.tagRow}>
+            {RIDE_TAGS.map(tag => (
+              <TouchableOpacity
+                key={tag.value}
+                style={[styles.tagBtn, rideTag === tag.value && { borderColor: tag.color, backgroundColor: tag.color + '22' }]}
+                onPress={() => setRideTag(tag.value)}
+              >
+                <MaterialCommunityIcons name={tag.icon} size={14} color={rideTag === tag.value ? tag.color : COLORS.textMuted} />
+                <Text style={[styles.tagBtnText, rideTag === tag.value && { color: tag.color }]}>{tag.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
@@ -135,6 +193,16 @@ const styles = StyleSheet.create({
   inputWrapper: { position: 'relative' },
   inputIcon: { position: 'absolute', left: 12, top: 14, zIndex: 1 },
   input: { backgroundColor: COLORS.card, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: COLORS.border },
+  inputIconRight: { position: 'absolute', right: 12, top: 14, zIndex: 1 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalSheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  modalCancel: { fontSize: 15, color: COLORS.textMuted },
+  modalDone: { fontSize: 15, fontWeight: '700', color: COLORS.primary },
+  tagRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  tagBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.card },
+  tagBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
   summaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 14, padding: 16, marginBottom: 16, gap: 12 },
   summaryIcon: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   summaryCategory: { fontSize: 15, fontWeight: '700', color: COLORS.text },
