@@ -10,6 +10,7 @@ import {
   setDefaultBike, getDefaultBikeId, getLastOdometer, getServiceReminders
 } from '../database/db';
 import { COLORS, MONTHS, formatCurrency, formatDate } from '../constants';
+import GlobalFAB from './GlobalFAB';
 
 const StatCard = ({ icon, label, value, sub, color }) => (
   <View style={[styles.statCard, { borderLeftColor: color || COLORS.primary }]}>
@@ -119,7 +120,7 @@ export default function DashboardScreen({ navigation }) {
   });
 
   return (
-    <>
+    <View style={{ flex: 1 }}>
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
@@ -254,24 +255,12 @@ export default function DashboardScreen({ navigation }) {
               </>
             )}
 
-            <View style={styles.sectionTitle}>
-              <MaterialCommunityIcons name="lightning-bolt" size={18} color={COLORS.primary} />
-              <Text style={styles.sectionTitleText}>Quick Add</Text>
-            </View>
-            <View style={styles.quickActions}>
-              <TouchableOpacity style={[styles.quickBtn, { backgroundColor: COLORS.primary }]} onPress={() => navigation.navigate('AddFuel')}>
-                <MaterialCommunityIcons name="gas-station" size={26} color={COLORS.white} />
-                <Text style={styles.quickBtnText}>Add Fuel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.quickBtn, { backgroundColor: COLORS.accentGreen }]} onPress={() => navigation.navigate('AddExpense')}>
-                <MaterialCommunityIcons name="wrench" size={26} color={COLORS.white} />
-                <Text style={styles.quickBtnText}>Add Expense</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={{ height: 30 }} />
+            <View style={{ height: 90 }} />
           </>
         )}
       </ScrollView>
+
+      <GlobalFAB />
 
       {/* Bike Picker Modal */}
       <Modal visible={showBikePicker} transparent animationType="slide" onRequestClose={() => setShowBikePicker(false)}>
@@ -305,7 +294,7 @@ export default function DashboardScreen({ navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </>
+    </View>
   );
 }
 
@@ -325,7 +314,7 @@ const styles = StyleSheet.create({
   alertBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.accent + '18', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 10, borderWidth: 1, borderColor: COLORS.accent + '44' },
   alertText: { flex: 1, fontSize: 12, fontWeight: '600', color: COLORS.accent },
 
-  monthSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginVertical: 14, backgroundColor: COLORS.card, borderRadius: 14, paddingVertical: 10 },
+  monthSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginVertical: 14, backgroundColor: COLORS.card, borderRadius: 14, paddingVertical: 10, height: 52 },
   monthArrow: { paddingHorizontal: 20 },
   monthText: { fontSize: 16, fontWeight: '700', color: COLORS.text, minWidth: 160, textAlign: 'center' },
 

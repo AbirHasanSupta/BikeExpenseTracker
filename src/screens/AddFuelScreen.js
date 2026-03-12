@@ -28,6 +28,7 @@ export default function AddFuelScreen({ navigation }) {
   const [dateObj, setDateObj] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [amount, setAmount] = useState('');
+  const [remainingFuel, setRemainingFuel] = useState('');
   const [odometer, setOdometer] = useState('');
   const [stationName, setStationName] = useState('');
   const [notes, setNotes] = useState('');
@@ -47,7 +48,9 @@ export default function AddFuelScreen({ navigation }) {
 
   const fuelPrice = parseFloat(settings.fuel_price) || 108;
   const amountNum = parseFloat(amount) || 0;
-  const litres = entryMethod === 'price' ? amountNum / fuelPrice : amountNum;
+  const remainingNum = parseFloat(remainingFuel) || 0;
+  const newLitres = entryMethod === 'price' ? amountNum / fuelPrice : amountNum;
+  const litres = newLitres + remainingNum;
   const totalCost = entryMethod === 'price' ? amountNum : amountNum * fuelPrice;
 
   const handleSave = () => {
@@ -70,7 +73,7 @@ export default function AddFuelScreen({ navigation }) {
         rideTag,
       });
       Alert.alert('Saved!', 'Fuel entry added successfully.', [
-        { text: 'Add Another', onPress: () => { setAmount(''); setOdometer(''); setStationName(''); setNotes(''); setSaving(false); } },
+        { text: 'Add Another', onPress: () => { setAmount(''); setOdometer(''); setStationName(''); setNotes(''); setRemainingFuel(''); setSaving(false); } },
         { text: 'Done', onPress: () => navigation.goBack() },
       ]);
     } catch (e) {
@@ -101,11 +104,20 @@ export default function AddFuelScreen({ navigation }) {
 
         {amountNum > 0 && (
           <View style={styles.previewCard}>
-            <View style={styles.previewItem}><Text style={styles.previewLabel}>Litres</Text><Text style={styles.previewValue}>{litres.toFixed(2)} L</Text></View>
+            <View style={styles.previewItem}>
+              <Text style={styles.previewLabel}>Added</Text>
+              <Text style={styles.previewValue}>{newLitres.toFixed(2)} L</Text>
+            </View>
             <View style={styles.previewDivider} />
-            <View style={styles.previewItem}><Text style={styles.previewLabel}>Total Cost</Text><Text style={[styles.previewValue, { color: COLORS.primary }]}>{formatCurrency(totalCost, settings.currency)}</Text></View>
+            <View style={styles.previewItem}>
+              <Text style={styles.previewLabel}>Total in Tank</Text>
+              <Text style={[styles.previewValue, { color: COLORS.accentGreen }]}>{litres.toFixed(2)} L</Text>
+            </View>
             <View style={styles.previewDivider} />
-            <View style={styles.previewItem}><Text style={styles.previewLabel}>Price/L</Text><Text style={styles.previewValue}>{settings.currency} {fuelPrice}</Text></View>
+            <View style={styles.previewItem}>
+              <Text style={styles.previewLabel}>Cost</Text>
+              <Text style={[styles.previewValue, { color: COLORS.primary }]}>{formatCurrency(totalCost, settings.currency)}</Text>
+            </View>
           </View>
         )}
 
@@ -166,6 +178,8 @@ export default function AddFuelScreen({ navigation }) {
         )}
 
         <InputField label={entryMethod === 'price' ? `Amount Paid (${settings.currency})` : 'Litres Added'} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={entryMethod === 'price' ? 'e.g. 500' : 'e.g. 4.5'} icon={entryMethod === 'price' ? 'currency-bdt' : 'water'} required />
+
+        <InputField label="Remaining Fuel Before Fill (L)" value={remainingFuel} onChangeText={setRemainingFuel} keyboardType="decimal-pad" placeholder="e.g. 1.5  (leave blank if 0)" icon="gauge" />
         <InputField label="Odometer Reading (km)" value={odometer} onChangeText={setOdometer} keyboardType="decimal-pad" placeholder={lastOdometer > 0 ? `Last: ${lastOdometer} km` : 'e.g. 15240'} icon="counter" required />
 
         {lastOdometer > 0 && odometer && parseFloat(odometer) > lastOdometer && (

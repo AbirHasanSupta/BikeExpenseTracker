@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getFuelLogs, getExpenses, deleteFuelLog, deleteExpense, getSettings, getDefaultBikeId } from '../database/db';
 import { COLORS, getCategoryInfo, getRideTagInfo, formatCurrency, formatDate } from '../constants';
+import GlobalFAB from './GlobalFAB';
 
 const TAG_FILTERS = [
   { label: 'All', value: null },
@@ -64,7 +65,7 @@ const ExpenseItem = ({ item, currency, onDelete }) => {
   );
 };
 
-export default function HistoryScreen() {
+export default function HistoryScreen({ navigation }) {
   const [tab, setTab] = useState('fuel');
   const [tagFilter, setTagFilter] = useState(null);
   const [fuelLogs, setFuelLogs] = useState([]);
@@ -141,6 +142,7 @@ export default function HistoryScreen() {
           </View>
         }
       />
+      <GlobalFAB />
     </View>
   );
 }

@@ -32,6 +32,8 @@ function HistoryStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="HistoryMain" component={HistoryScreen} />
+      <Stack.Screen name="AddFuel" component={AddFuelScreen} />
+      <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
     </Stack.Navigator>
   );
 }
@@ -40,6 +42,8 @@ function AnalyticsStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="AnalyticsMain" component={AnalyticsScreen} />
+      <Stack.Screen name="AddFuel" component={AddFuelScreen} />
+      <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
     </Stack.Navigator>
   );
 }

@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import { getMonthlyStats, getSettings, getStationStats, getTagStats, getDefaultBikeId } from '../database/db';
 import { COLORS, MONTHS, RIDE_TAGS, formatCurrency, getRideTagInfo } from '../constants';
+import GlobalFAB from './GlobalFAB';
 
 const W = Dimensions.get('window').width - 32;
 const chartConfig = {
@@ -19,7 +20,7 @@ const chartConfig = {
   propsForBackgroundLines: { stroke: COLORS.border, strokeDasharray: '4' },
 };
 
-export default function AnalyticsScreen() {
+export default function AnalyticsScreen({ navigation }) {
   const [monthlyData, setMonthlyData] = useState([]);
   const [currency, setCurrency] = useState('BDT');
   const [loading, setLoading] = useState(true);
@@ -76,7 +77,8 @@ export default function AnalyticsScreen() {
     }));
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={{ flex: 1 }}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <Text style={styles.title}>Analytics</Text>
         <Text style={styles.subtitle}>Last 6 months</Text>
@@ -194,6 +196,8 @@ export default function AnalyticsScreen() {
         </>
       )}
     </ScrollView>
+    <GlobalFAB />
+    </View>
   );
 }
 
