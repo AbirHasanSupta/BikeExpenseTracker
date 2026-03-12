@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, RefreshControl, ScrollView, TextInput } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getFuelLogs, getExpenses, deleteFuelLog, deleteExpense, getSettings, getDefaultBikeId } from '../database/db';
-import { COLORS, getCategoryInfo, getRideTagInfo, formatCurrency, formatDate } from '../constants';
+import { getCategoryInfo, getRideTagInfo, formatCurrency, formatDate } from '../constants';
+import { useTheme } from '../context/ThemeContext';
 import GlobalFAB from './GlobalFAB';
 
 const TAG_FILTERS = [
@@ -14,7 +15,7 @@ const TAG_FILTERS = [
   { label: 'Other', value: 'other' },
 ];
 
-const FuelItem = ({ item, currency, onDelete }) => {
+const FuelItem = ({ item, currency, onDelete, onEdit, COLORS, styles }) => {
   const tag = getRideTagInfo(item.ride_tag || 'personal');
   return (
     <View style={styles.historyItem}>
@@ -32,14 +33,16 @@ const FuelItem = ({ item, currency, onDelete }) => {
         <Text style={styles.historyMeta}>{formatDate(item.date)} · {item.odometer.toLocaleString()} km</Text>
         {item.station_name ? <Text style={styles.historyNote}>{item.station_name}</Text> : null}
       </View>
-      <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
-        <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLORS.accentRed} />
-      </TouchableOpacity>
+      <View style={styles.itemActions}>
+        <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
+          <MaterialCommunityIcons name="trash-can-outline" size={16} color={COLORS.accentRed} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
-const ExpenseItem = ({ item, currency, onDelete }) => {
+const ExpenseItem = ({ item, currency, onDelete, onEdit, COLORS, styles }) => {
   const cat = getCategoryInfo(item.category);
   const tag = getRideTagInfo(item.ride_tag || 'personal');
   return (
@@ -58,16 +61,24 @@ const ExpenseItem = ({ item, currency, onDelete }) => {
         <Text style={styles.historyMeta}>{formatDate(item.date)}</Text>
         {item.notes ? <Text style={styles.historyNote}>{item.notes}</Text> : null}
       </View>
-      <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
-        <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLORS.accentRed} />
-      </TouchableOpacity>
+      <View style={styles.itemActions}>
+        
+        <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
+          <MaterialCommunityIcons name="trash-can-outline" size={16} color={COLORS.accentRed} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
 export default function HistoryScreen({ navigation }) {
+  const { COLORS } = useTheme();
+  const styles = makeStyles(COLORS);
+
   const [tab, setTab] = useState('fuel');
   const [tagFilter, setTagFilter] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
   const [fuelLogs, setFuelLogs] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [currency, setCurrency] = useState('BDT');
@@ -95,49 +106,102 @@ export default function HistoryScreen({ navigation }) {
     ]);
   };
 
+  const handleEdit = (id, type) => {
+    navigation.navigate(type === 'fuel' ? 'EditFuel' : 'EditExpense', { id });
+  };
+
   const rawData = tab === 'fuel' ? fuelLogs : expenses;
-  const data = tagFilter ? rawData.filter(i => (i.ride_tag || 'personal') === tagFilter) : rawData;
+
+  const filteredData = rawData.filter(item => {
+    const matchesTag = tagFilter ? (item.ride_tag || 'personal') === tagFilter : true;
+    if (!searchQuery.trim()) return matchesTag;
+    const q = searchQuery.toLowerCase();
+    if (tab === 'fuel') {
+      return matchesTag && (
+        (item.station_name || '').toLowerCase().includes(q) ||
+        (item.notes || '').toLowerCase().includes(q) ||
+        String(item.litres).includes(q) ||
+        String(item.total_cost).includes(q) ||
+        item.date.includes(q)
+      );
+    } else {
+      const cat = getCategoryInfo(item.category);
+      return matchesTag && (
+        cat.label.toLowerCase().includes(q) ||
+        (item.notes || '').toLowerCase().includes(q) ||
+        String(item.cost).includes(q) ||
+        item.date.includes(q)
+      );
+    }
+  });
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.title}>History</Text></View>
+      <View style={styles.header}>
+        <Text style={styles.title}>History</Text>
+        <TouchableOpacity onPress={() => { setShowSearch(!showSearch); setSearchQuery(''); }} style={styles.searchToggle}>
+          <MaterialCommunityIcons name={showSearch ? 'close' : 'magnify'} size={22} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {showSearch && (
+        <View style={styles.searchBar}>
+          <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={tab === 'fuel' ? 'Search station, date, amount...' : 'Search category, notes, date...'}
+            placeholderTextColor={COLORS.textMuted}
+            autoFocus
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <MaterialCommunityIcons name="close-circle" size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       <View style={styles.tabRow}>
         {[['fuel', 'gas-station', 'Fuel'], ['expense', 'wrench', 'Expenses']].map(([key, icon, label]) => (
-          <TouchableOpacity key={key} style={[styles.tab, tab === key && styles.tabActive]} onPress={() => setTab(key)}>
+          <TouchableOpacity key={key} style={[styles.tab, tab === key && styles.tabActive]} onPress={() => { setTab(key); setSearchQuery(''); }}>
             <MaterialCommunityIcons name={icon} size={16} color={tab === key ? COLORS.white : COLORS.textMuted} />
             <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label} ({key === 'fuel' ? fuelLogs.length : expenses.length})</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Tag filter row */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagFilterScroll} contentContainerStyle={styles.tagFilterContent}>
         {TAG_FILTERS.map(f => (
-          <TouchableOpacity
-            key={String(f.value)}
+          <TouchableOpacity key={String(f.value)}
             style={[styles.tagFilterBtn, tagFilter === f.value && styles.tagFilterBtnActive]}
-            onPress={() => setTagFilter(f.value)}
-          >
+            onPress={() => setTagFilter(f.value)}>
             <Text style={[styles.tagFilterText, tagFilter === f.value && styles.tagFilterTextActive]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
+      {searchQuery.length > 0 && (
+        <Text style={styles.resultCount}>{filteredData.length} result{filteredData.length !== 1 ? 's' : ''} for "{searchQuery}"</Text>
+      )}
+
       <FlatList
-        data={data}
+        data={filteredData}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor={COLORS.primary} />}
         renderItem={({ item }) => tab === 'fuel'
-          ? <FuelItem item={item} currency={currency} onDelete={(id) => confirmDelete(id, 'fuel')} />
-          : <ExpenseItem item={item} currency={currency} onDelete={(id) => confirmDelete(id, 'expense')} />
+          ? <FuelItem item={item} currency={currency} COLORS={COLORS} styles={styles}
+              onDelete={(id) => confirmDelete(id, 'fuel')} onEdit={(id) => handleEdit(id, 'fuel')} />
+          : <ExpenseItem item={item} currency={currency} COLORS={COLORS} styles={styles}
+              onDelete={(id) => confirmDelete(id, 'expense')} onEdit={(id) => handleEdit(id, 'expense')} />
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <MaterialCommunityIcons name={tab === 'fuel' ? 'gas-station' : 'wrench'} size={60} color={COLORS.textMuted} />
+            <MaterialCommunityIcons name={searchQuery ? 'magnify-close' : tab === 'fuel' ? 'gas-station' : 'wrench'} size={60} color={COLORS.textMuted} />
             <Text style={styles.emptyText}>
-              {tagFilter ? `No ${tab === 'fuel' ? 'fuel entries' : 'expenses'} for this tag` : `No ${tab === 'fuel' ? 'fuel entries' : 'expenses'} yet`}
+              {searchQuery ? 'No results found' : tagFilter ? 'No entries for this tag' : `No ${tab === 'fuel' ? 'fuel entries' : 'expenses'} yet`}
             </Text>
           </View>
         }
@@ -147,10 +211,15 @@ export default function HistoryScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 20, paddingBottom: 12 },
   title: { fontSize: 26, fontWeight: '800', color: COLORS.text },
+  searchToggle: { padding: 6 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 12, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: COLORS.border },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, paddingVertical: 12, fontSize: 14, color: COLORS.text },
+  resultCount: { fontSize: 12, color: COLORS.textMuted, paddingHorizontal: 16, marginBottom: 6 },
   tabRow: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: COLORS.card, borderRadius: 14, padding: 4, marginBottom: 10 },
   tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: 10 },
   tabActive: { backgroundColor: COLORS.primary },
@@ -162,7 +231,7 @@ const styles = StyleSheet.create({
   tagFilterBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   tagFilterText: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
   tagFilterTextActive: { color: COLORS.white },
-  list: { paddingHorizontal: 16, paddingBottom: 30 },
+  list: { paddingHorizontal: 16, paddingBottom: 100 },
   historyItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 14, padding: 14, marginBottom: 10, gap: 12, borderWidth: 1, borderColor: COLORS.border },
   historyIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   historyContent: { flex: 1 },
@@ -172,7 +241,8 @@ const styles = StyleSheet.create({
   tagBadgeText: { fontSize: 10, fontWeight: '700' },
   historyMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
   historyNote: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2, fontStyle: 'italic' },
-  deleteBtn: { padding: 8 },
+  itemActions: { flexDirection: 'column', gap: 6 },
+  deleteBtn: { padding: 6 },
   empty: { alignItems: 'center', paddingTop: 80 },
   emptyText: { fontSize: 16, fontWeight: '700', color: COLORS.textSecondary, marginTop: 16, textAlign: 'center' },
 });

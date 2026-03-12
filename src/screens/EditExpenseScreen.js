@@ -2,43 +2,48 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { addExpense, getSettings, getDefaultBikeId } from '../database/db';
-import { EXPENSE_CATEGORIES, RIDE_TAGS, getTodayString, formatCurrency } from '../constants';
+import { getExpenseById, updateExpense, getSettings } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
+import { EXPENSE_CATEGORIES, RIDE_TAGS, formatCurrency } from '../constants';
 
-export default function AddExpenseScreen({ navigation }) {
+export default function EditExpenseScreen({ navigation, route }) {
   const { COLORS } = useTheme();
   const styles = makeStyles(COLORS);
-  const [date, setDate] = useState(getTodayString());
+  const { id } = route.params;
+
+  const [date, setDate] = useState('');
   const [dateObj, setDateObj] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [category, setCategory] = useState(null);
   const [cost, setCost] = useState('');
   const [notes, setNotes] = useState('');
   const [rideTag, setRideTag] = useState('personal');
-  const [settings, setSettings] = useState({ currency: 'BDT' });
+  const [currency, setCurrency] = useState('BDT');
   const [saving, setSaving] = useState(false);
-  const [bikeId, setBikeId] = useState(1);
 
   useEffect(() => {
-    setSettings(getSettings());
-    setBikeId(getDefaultBikeId());
-  }, []);
+    const exp = getExpenseById(id);
+    if (!exp) { Alert.alert('Error', 'Entry not found.'); navigation.goBack(); return; }
+    setDate(exp.date);
+    setDateObj(new Date(exp.date));
+    setCategory(exp.category);
+    setCost(String(exp.cost));
+    setNotes(exp.notes || '');
+    setRideTag(exp.ride_tag || 'personal');
+    setCurrency(getSettings().currency);
+  }, [id]);
 
   const selectedCat = EXPENSE_CATEGORIES.find(c => c.value === category);
 
   const handleSave = () => {
-    if (!category) { Alert.alert('Select Category', 'Please select an expense category.'); return; }
-    if (!cost || parseFloat(cost) <= 0) { Alert.alert('Enter Cost', 'Please enter a valid cost.'); return; }
+    if (!category) { Alert.alert('Required', 'Please select a category.'); return; }
+    if (!cost || parseFloat(cost) <= 0) { Alert.alert('Required', 'Please enter a valid cost.'); return; }
     try {
       setSaving(true);
-      addExpense({ bikeId, date, category, cost: parseFloat(cost), notes, rideTag });
-      Alert.alert('Saved!', 'Expense added successfully.', [
-        { text: 'Add Another', onPress: () => { setCategory(null); setCost(''); setNotes(''); setSaving(false); } },
-        { text: 'Done', onPress: () => navigation.goBack() },
-      ]);
+      updateExpense({ id, date, category, cost: parseFloat(cost), notes, rideTag });
+      Alert.alert('Updated!', 'Expense updated.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e) {
-      Alert.alert('Error', 'Failed to save. Please try again.');
+      Alert.alert('Error', 'Failed to update.');
       setSaving(false);
     }
   };
@@ -50,14 +55,16 @@ export default function AddExpenseScreen({ navigation }) {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Add Expense</Text>
+          <Text style={styles.title}>Edit Expense</Text>
           <View style={{ width: 40 }} />
         </View>
 
-        <Text style={styles.sectionLabel}>Category <Text style={{ color: COLORS.primary }}>*</Text></Text>
+        <Text style={styles.sectionLabel}>Category *</Text>
         <View style={styles.categoryGrid}>
           {EXPENSE_CATEGORIES.map((cat) => (
-            <TouchableOpacity key={cat.value} style={[styles.catItem, category === cat.value && { borderColor: cat.color, backgroundColor: cat.color + '22' }]} onPress={() => setCategory(cat.value)}>
+            <TouchableOpacity key={cat.value}
+              style={[styles.catItem, category === cat.value && { borderColor: cat.color, backgroundColor: cat.color + '22' }]}
+              onPress={() => setCategory(cat.value)}>
               <View style={[styles.catIcon, { backgroundColor: cat.color + '22' }]}>
                 <MaterialCommunityIcons name={cat.icon} size={20} color={cat.color} />
               </View>
@@ -67,65 +74,38 @@ export default function AddExpenseScreen({ navigation }) {
           ))}
         </View>
 
+        {/* Date */}
         <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Date <Text style={{ color: COLORS.primary }}>*</Text></Text>
+          <Text style={styles.inputLabel}>Date</Text>
           <TouchableOpacity style={styles.inputWrapper} onPress={() => setShowDatePicker(true)}>
             <MaterialCommunityIcons name="calendar" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
             <View style={[styles.input, { paddingLeft: 40, justifyContent: 'center' }]}>
               <Text style={{ fontSize: 15, color: COLORS.text }}>{date}</Text>
             </View>
-            <MaterialCommunityIcons name="chevron-down" size={18} color={COLORS.textMuted} style={styles.inputIconRight} />
           </TouchableOpacity>
         </View>
 
         {showDatePicker && Platform.OS === 'android' && (
-          <DateTimePicker
-            value={dateObj}
-            mode="date"
-            display="calendar"
-            onChange={(event, selectedDate) => {
-              setShowDatePicker(false);
-              if (event.type === 'set' && selectedDate) {
-                setDateObj(selectedDate);
-                setDate(`${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`);
-              }
-            }}
-          />
+          <DateTimePicker value={dateObj} mode="date" display="calendar"
+            onChange={(e, d) => { setShowDatePicker(false); if (e.type === 'set' && d) { setDateObj(d); setDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`); } }} />
         )}
-
         {showDatePicker && Platform.OS === 'ios' && (
           <Modal transparent animationType="slide" visible={showDatePicker}>
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalSheet}>
-                <View style={styles.modalHeader}>
-                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                    <Text style={styles.modalCancel}>Cancel</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.modalTitle}>Select Date</Text>
-                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                    <Text style={styles.modalDone}>Done</Text>
-                  </TouchableOpacity>
-                </View>
-                <DateTimePicker
-                  value={dateObj}
-                  mode="date"
-                  display="inline"
-                  onChange={(event, selectedDate) => {
-                    if (selectedDate) {
-                      setDateObj(selectedDate);
-                      setDate(`${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`);
-                    }
-                  }}
-                  style={{ alignSelf: 'center' }}
-                />
+            <View style={styles.modalOverlay}><View style={styles.modalSheet}>
+              <View style={styles.modalHeader}>
+                <TouchableOpacity onPress={() => setShowDatePicker(false)}><Text style={styles.modalCancel}>Cancel</Text></TouchableOpacity>
+                <Text style={styles.modalTitle2}>Select Date</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(false)}><Text style={styles.modalDone}>Done</Text></TouchableOpacity>
               </View>
-            </View>
+              <DateTimePicker value={dateObj} mode="date" display="inline"
+                onChange={(e, d) => { if (d) { setDateObj(d); setDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`); } }}
+                style={{ alignSelf: 'center' }} />
+            </View></View>
           </Modal>
         )}
 
-
         <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Cost ({settings.currency}) <Text style={{ color: COLORS.primary }}>*</Text></Text>
+          <Text style={styles.inputLabel}>Cost ({currency}) *</Text>
           <View style={styles.inputWrapper}>
             <MaterialCommunityIcons name="currency-bdt" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
             <TextInput style={[styles.input, { paddingLeft: 40 }]} value={cost} onChangeText={setCost} keyboardType="decimal-pad" placeholder="e.g. 500" placeholderTextColor={COLORS.textMuted} />
@@ -133,24 +113,21 @@ export default function AddExpenseScreen({ navigation }) {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Notes (optional)</Text>
+          <Text style={styles.inputLabel}>Notes</Text>
           <View style={styles.inputWrapper}>
             <MaterialCommunityIcons name="note-text" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
             <TextInput style={[styles.input, { paddingLeft: 40 }]} value={notes} onChangeText={setNotes} placeholder="Any notes..." placeholderTextColor={COLORS.textMuted} />
           </View>
         </View>
 
-        {/* Ride Tag */}
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Ride Tag</Text>
           <View style={styles.tagRow}>
             {RIDE_TAGS.map(tag => (
-              <TouchableOpacity
-                key={tag.value}
+              <TouchableOpacity key={tag.value}
                 style={[styles.tagBtn, rideTag === tag.value && { borderColor: tag.color, backgroundColor: tag.color + '22' }]}
-                onPress={() => setRideTag(tag.value)}
-              >
-                <MaterialCommunityIcons name={tag.icon} size={14} color={rideTag === tag.value ? tag.color : COLORS.textMuted} />
+                onPress={() => setRideTag(tag.value)}>
+                <MaterialCommunityIcons name={tag.icon} size={13} color={rideTag === tag.value ? tag.color : COLORS.textMuted} />
                 <Text style={[styles.tagBtnText, rideTag === tag.value && { color: tag.color }]}>{tag.label}</Text>
               </TouchableOpacity>
             ))}
@@ -166,13 +143,13 @@ export default function AddExpenseScreen({ navigation }) {
               <Text style={styles.summaryCategory}>{selectedCat?.label}</Text>
               <Text style={styles.summaryDate}>{date}</Text>
             </View>
-            <Text style={[styles.summaryCost, { color: selectedCat?.color || COLORS.primary }]}>{formatCurrency(cost, settings.currency)}</Text>
+            <Text style={[styles.summaryCost, { color: selectedCat?.color || COLORS.primary }]}>{formatCurrency(cost, currency)}</Text>
           </View>
         ) : null}
 
         <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.7 }]} onPress={handleSave} disabled={saving}>
           <MaterialCommunityIcons name="check-circle" size={22} color={COLORS.white} />
-          <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Expense'}</Text>
+          <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Update Expense'}</Text>
         </TouchableOpacity>
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -196,13 +173,6 @@ const makeStyles = (COLORS) => StyleSheet.create({
   inputWrapper: { position: 'relative' },
   inputIcon: { position: 'absolute', left: 12, top: 14, zIndex: 1 },
   input: { backgroundColor: COLORS.card, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: COLORS.border },
-  inputIconRight: { position: 'absolute', right: 12, top: 14, zIndex: 1 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  modalTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
-  modalCancel: { fontSize: 15, color: COLORS.textMuted },
-  modalDone: { fontSize: 15, fontWeight: '700', color: COLORS.primary },
   tagRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   tagBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.card },
   tagBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
@@ -213,4 +183,10 @@ const makeStyles = (COLORS) => StyleSheet.create({
   summaryCost: { fontSize: 18, fontWeight: '800' },
   saveBtn: { backgroundColor: COLORS.accentGreen, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 8, elevation: 8 },
   saveBtnText: { fontSize: 16, fontWeight: '800', color: COLORS.white },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalSheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalTitle2: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  modalCancel: { fontSize: 15, color: COLORS.textMuted },
+  modalDone: { fontSize: 15, fontWeight: '700', color: COLORS.primary },
 });

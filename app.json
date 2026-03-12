@@ -32,7 +32,14 @@
       "@react-native-community/datetimepicker",
       "expo-font",
       "expo-asset",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#FF6B35"
+        }
+      ]
     ]
   }
 }

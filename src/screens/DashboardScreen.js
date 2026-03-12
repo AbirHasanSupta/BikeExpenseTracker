@@ -9,10 +9,11 @@ import {
   getMonthlyStats, getSettings, getLastFuelLog, getBikes,
   setDefaultBike, getDefaultBikeId, getLastOdometer, getServiceReminders
 } from '../database/db';
-import { COLORS, MONTHS, formatCurrency, formatDate } from '../constants';
+import { MONTHS, formatCurrency, formatDate } from '../constants';
+import { useTheme } from '../context/ThemeContext';
 import GlobalFAB from './GlobalFAB';
 
-const StatCard = ({ icon, label, value, sub, color }) => (
+const StatCard = ({ icon, label, value, sub, color, COLORS, styles }) => (
   <View style={[styles.statCard, { borderLeftColor: color || COLORS.primary }]}>
     <View style={[styles.statIcon, { backgroundColor: (color || COLORS.primary) + '22' }]}>
       <MaterialCommunityIcons name={icon} size={22} color={color || COLORS.primary} />
@@ -26,6 +27,8 @@ const StatCard = ({ icon, label, value, sub, color }) => (
 );
 
 export default function DashboardScreen({ navigation }) {
+  const { COLORS } = useTheme();
+  const styles = makeStyles(COLORS);
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -227,10 +230,10 @@ export default function DashboardScreen({ navigation }) {
               <Text style={styles.sectionTitleText}>Riding Stats</Text>
             </View>
 
-            <StatCard icon="map-marker-distance" label="Distance Traveled" value={`${(stats?.distance || 0).toFixed(0)} km`} color={COLORS.accentBlue} />
-            <StatCard icon="gas-station" label="Total Fuel Used" value={`${(stats?.totalLitres || 0).toFixed(2)} L`} sub={`@ ${cur} ${settings.fuel_price}/L`} color={COLORS.primary} />
-            <StatCard icon="speedometer" label="Average Mileage" value={stats?.mileage > 0 ? `${stats.mileage.toFixed(1)} km/L` : '—'} color={COLORS.accentGreen} />
-            <StatCard icon="currency-bdt" label="Cost Per Kilometer" value={stats?.costPerKm > 0 ? `${cur} ${stats.costPerKm.toFixed(2)}/km` : '—'} color={COLORS.accent} />
+            <StatCard icon="map-marker-distance" label="Distance Traveled" value={`${(stats?.distance || 0).toFixed(0)} km`} color={COLORS.accentBlue} COLORS={COLORS} styles={styles} />
+            <StatCard icon="gas-station" label="Total Fuel Used" value={`${(stats?.totalLitres || 0).toFixed(2)} L`} sub={`@ ${cur} ${settings.fuel_price}/L`} color={COLORS.primary} COLORS={COLORS} styles={styles} />
+            <StatCard icon="speedometer" label="Average Mileage" value={stats?.mileage > 0 ? `${stats.mileage.toFixed(1)} km/L` : '—'} color={COLORS.accentGreen} COLORS={COLORS} styles={styles} />
+            <StatCard icon="currency-bdt" label="Cost Per Kilometer" value={stats?.costPerKm > 0 ? `${cur} ${stats.costPerKm.toFixed(2)}/km` : '—'} color={COLORS.accent} COLORS={COLORS} styles={styles} />
 
             {lastFuelLog && (
               <>
@@ -260,7 +263,7 @@ export default function DashboardScreen({ navigation }) {
         )}
       </ScrollView>
 
-      <GlobalFAB />
+      <GlobalFAB navigation={navigation} />
 
       {/* Bike Picker Modal */}
       <Modal visible={showBikePicker} transparent animationType="slide" onRequestClose={() => setShowBikePicker(false)}>
@@ -298,7 +301,7 @@ export default function DashboardScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 16 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, paddingBottom: 10 },
   headerGreeting: { fontSize: 26, fontWeight: '800', color: COLORS.text },

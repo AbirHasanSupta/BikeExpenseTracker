@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, Share, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, Share, Switch } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   getSettings, updateSettings, getBikes, addBike, deleteBike, setDefaultBike,
   getServiceReminders, addServiceReminder, updateReminderServiceKm, deleteServiceReminder,
   getLastOdometer, getAllDataForExport,
 } from '../database/db';
-import { COLORS, formatDate } from '../constants';
+import { useTheme } from '../context/ThemeContext';
+import { checkAndNotifyReminders } from '../utils/notifications';
+import { formatDate } from '../constants';
 
 const DEFAULT_REMINDERS = [
   { title: 'Engine Oil Change', intervalKm: 3000 },
@@ -16,6 +18,9 @@ const DEFAULT_REMINDERS = [
 ];
 
 export default function SettingsScreen({ navigation }) {
+  const { COLORS, theme, toggleTheme } = useTheme();
+  const styles = makeStyles(COLORS);
+
   const [fuelPrice, setFuelPrice] = useState('108');
   const [currency, setCurrency] = useState('BDT');
   const [bikes, setBikes] = useState([]);
@@ -41,14 +46,18 @@ export default function SettingsScreen({ navigation }) {
     setDefaultBikeIdState(bikeId);
     setActiveBikeId(bikeId);
     setBikes(getBikes());
-    setReminders(getServiceReminders(bikeId));
-    setCurrentOdometer(getLastOdometer(bikeId));
+    const rems = getServiceReminders(bikeId);
+    setReminders(rems);
+    const odo = getLastOdometer(bikeId);
+    setCurrentOdometer(odo);
+    // Check and send notifications for due reminders
+    checkAndNotifyReminders(rems, odo);
   };
 
   const handleSaveSettings = () => {
     if (!fuelPrice || parseFloat(fuelPrice) <= 0) { Alert.alert('Invalid', 'Please enter a valid fuel price.'); return; }
     try {
-      updateSettings(parseFloat(fuelPrice), currency, activeBikeId);
+      updateSettings(parseFloat(fuelPrice), currency, activeBikeId, theme);
       Alert.alert('Saved', 'Settings updated successfully.');
     } catch (e) { Alert.alert('Error', 'Failed to save settings.'); }
   };
@@ -56,17 +65,18 @@ export default function SettingsScreen({ navigation }) {
   const handleSetDefaultBike = (id) => {
     setDefaultBike(id);
     setActiveBikeId(id);
-    setReminders(getServiceReminders(id));
-    setCurrentOdometer(getLastOdometer(id));
-    updateSettings(parseFloat(fuelPrice), currency, id);
+    const rems = getServiceReminders(id);
+    setReminders(rems);
+    const odo = getLastOdometer(id);
+    setCurrentOdometer(odo);
+    updateSettings(parseFloat(fuelPrice), currency, id, theme);
+    checkAndNotifyReminders(rems, odo);
   };
 
   const handleAddBike = () => {
     if (!newBikeName.trim()) { Alert.alert('Name Required', 'Please enter a bike name.'); return; }
     addBike(newBikeName.trim(), parseFloat(tankCapacity) || 12, '');
-    setNewBikeName('');
-    setTankCapacity('12');
-    setShowAddBike(false);
+    setNewBikeName(''); setTankCapacity('12'); setShowAddBike(false);
     setBikes(getBikes());
     Alert.alert('Bike Added', `${newBikeName} has been added.`);
   };
@@ -79,9 +89,7 @@ export default function SettingsScreen({ navigation }) {
         deleteBike(bike.id);
         const remaining = getBikes();
         setBikes(remaining);
-        if (activeBikeId === bike.id && remaining.length > 0) {
-          handleSetDefaultBike(remaining[0].id);
-        }
+        if (activeBikeId === bike.id && remaining.length > 0) handleSetDefaultBike(remaining[0].id);
       }},
     ]);
   };
@@ -93,11 +101,11 @@ export default function SettingsScreen({ navigation }) {
     if (!title) { Alert.alert('Required', 'Please enter a reminder title.'); return; }
     if (!interval || interval <= 0) { Alert.alert('Required', 'Please enter a valid interval in km.'); return; }
     addServiceReminder({ bikeId: activeBikeId, title, intervalKm: interval, lastServiceKm: lastKm });
-    setReminders(getServiceReminders(activeBikeId));
+    const rems = getServiceReminders(activeBikeId);
+    setReminders(rems);
     setShowAddReminder(false);
-    setReminderTitle('');
-    setReminderInterval('');
-    setReminderLastKm('');
+    setReminderTitle(''); setReminderInterval(''); setReminderLastKm('');
+    checkAndNotifyReminders(rems, currentOdometer);
   };
 
   const handleMarkServiced = (reminder) => {
@@ -105,7 +113,9 @@ export default function SettingsScreen({ navigation }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Confirm', onPress: () => {
         updateReminderServiceKm(reminder.id, currentOdometer);
-        setReminders(getServiceReminders(activeBikeId));
+        const rems = getServiceReminders(activeBikeId);
+        setReminders(rems);
+        checkAndNotifyReminders(rems, currentOdometer);
       }},
     ]);
   };
@@ -124,26 +134,17 @@ export default function SettingsScreen({ navigation }) {
     try {
       const { fuelLogs, expenses } = getAllDataForExport(activeBikeId);
       const activeBike = bikes.find(b => b.id === activeBikeId);
-
       let csv = `Bike Expense Tracker Export\nBike: ${activeBike?.bike_name || 'Unknown'}\n\n`;
-
-      // Fuel logs
-      csv += 'FUEL LOGS\n';
-      csv += 'Date,Litres,Price/L,Total Cost,Odometer,Station,Notes,Tag\n';
+      csv += 'FUEL LOGS\nDate,Litres,Price/L,Total Cost,Odometer,Station,Notes,Tag\n';
       for (const log of fuelLogs) {
         csv += `${log.date},${log.litres},${log.price_per_litre},${log.total_cost},${log.odometer},"${log.station_name || ''}","${log.notes || ''}",${log.ride_tag || 'personal'}\n`;
       }
-
-      csv += '\nEXPENSES\n';
-      csv += 'Date,Category,Cost,Notes,Tag\n';
+      csv += '\nEXPENSES\nDate,Category,Cost,Notes,Tag\n';
       for (const exp of expenses) {
         csv += `${exp.date},${exp.category},${exp.cost},"${exp.notes || ''}",${exp.ride_tag || 'personal'}\n`;
       }
-
       await Share.share({ message: csv, title: 'Bike Expense Data' });
-    } catch (e) {
-      Alert.alert('Export Failed', 'Could not export data.');
-    }
+    } catch (e) { Alert.alert('Export Failed', 'Could not export data.'); }
   };
 
   const getReminderStatus = (reminder) => {
@@ -163,6 +164,28 @@ export default function SettingsScreen({ navigation }) {
         </TouchableOpacity>
         <Text style={styles.title}>Settings</Text>
         <View style={{ width: 40 }} />
+      </View>
+
+      {/* Appearance */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Appearance</Text>
+        <View style={styles.card}>
+          <View style={styles.themeRow}>
+            <View style={styles.themeLeft}>
+              <MaterialCommunityIcons name={theme === 'dark' ? 'moon-waning-crescent' : 'white-balance-sunny'} size={22} color={theme === 'dark' ? COLORS.accentPurple : COLORS.accent} />
+              <View>
+                <Text style={styles.themeLabel}>{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</Text>
+                <Text style={styles.themeSubLabel}>Tap to switch theme</Text>
+              </View>
+            </View>
+            <Switch
+              value={theme === 'light'}
+              onValueChange={toggleTheme}
+              trackColor={{ false: COLORS.border, true: COLORS.primary + '88' }}
+              thumbColor={theme === 'light' ? COLORS.primary : COLORS.textMuted}
+            />
+          </View>
+        </View>
       </View>
 
       {/* Fuel Settings */}
@@ -244,14 +267,10 @@ export default function SettingsScreen({ navigation }) {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Service Reminders</Text>
-          {currentOdometer > 0 && (
-            <Text style={styles.sectionSubtitle}>Current: {currentOdometer.toLocaleString()} km</Text>
-          )}
+          {currentOdometer > 0 && <Text style={styles.sectionSubtitle}>Current: {currentOdometer.toLocaleString()} km</Text>}
         </View>
         <View style={styles.card}>
-          {reminders.length === 0 && (
-            <Text style={styles.emptyText}>No reminders yet. Add one below or use a preset.</Text>
-          )}
+          {reminders.length === 0 && <Text style={styles.emptyText}>No reminders yet. Add one below or use a preset.</Text>}
           {reminders.map(reminder => {
             const status = getReminderStatus(reminder);
             return (
@@ -278,7 +297,6 @@ export default function SettingsScreen({ navigation }) {
             );
           })}
 
-          {/* Quick Presets */}
           {reminders.length === 0 && (
             <View style={styles.presetsSection}>
               <Text style={styles.presetsLabel}>Quick Presets:</Text>
@@ -328,7 +346,7 @@ export default function SettingsScreen({ navigation }) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>App Info</Text>
         <View style={styles.card}>
-          {[['Version', '1.1.0'], ['Database', 'SQLite (Local)'], ['Storage', 'On-device only']].map(([label, value]) => (
+          {[['Version', '1.2.0'], ['Database', 'SQLite (Local)'], ['Storage', 'On-device only']].map(([label, value]) => (
             <View key={label} style={styles.infoRow}>
               <Text style={styles.infoLabel}>{label}</Text>
               <Text style={styles.infoValue}>{value}</Text>
@@ -341,16 +359,22 @@ export default function SettingsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 16 },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: 20, paddingBottom: 16 },
   backBtn: { padding: 8 },
   title: { flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '800', color: COLORS.text },
   section: { marginBottom: 24 },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
   sectionSubtitle: { fontSize: 11, color: COLORS.textMuted },
   card: { backgroundColor: COLORS.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: COLORS.border },
+  // Theme toggle
+  themeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  themeLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  themeLabel: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  themeSubLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
+  // Inputs
   inputGroup: { marginBottom: 16 },
   inputLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 8 },
   inputWrapper: { position: 'relative' },
@@ -363,7 +387,6 @@ const styles = StyleSheet.create({
   currencyTextActive: { color: COLORS.white },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 },
   saveBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
-
   // Bikes
   bikeItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 12 },
   bikeIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -383,7 +406,6 @@ const styles = StyleSheet.create({
   cancelBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
   confirmBtn: { flex: 1, padding: 12, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: 'center' },
   confirmBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.white },
-
   // Reminders
   reminderItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   reminderStatusIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
@@ -401,12 +423,10 @@ const styles = StyleSheet.create({
   presetBtnSub: { fontSize: 11, color: COLORS.textMuted },
   addReminderForm: { paddingTop: 14, borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 8 },
   emptyText: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', paddingVertical: 8 },
-
   // Export
   exportDesc: { fontSize: 13, color: COLORS.textMuted, marginBottom: 14 },
   exportBtn: { backgroundColor: COLORS.accentBlue, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   exportBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
-
   // Info
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   infoLabel: { fontSize: 13, color: COLORS.textMuted },

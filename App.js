@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
-import React from 'react';
-import { StatusBar, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { StatusBar } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -12,7 +12,10 @@ import AddExpenseScreen from './src/screens/AddExpenseScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import AnalyticsScreen from './src/screens/AnalyticsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
-import { COLORS } from './src/constants';
+import TripScreen from './src/screens/TripScreen';
+
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import { requestNotificationPermission } from './src/utils/notifications';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -48,10 +51,29 @@ function AnalyticsStack() {
   );
 }
 
-export default function App() {
+function TripStack() {
   return (
-    <NavigationContainer>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="TripMain" component={TripScreen} />
+      <Stack.Screen name="AddFuel" component={AddFuelScreen} />
+      <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function AppTabs() {
+  const { COLORS, theme } = useTheme();
+
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
+  return (
+    <>
+      <StatusBar
+        barStyle={theme === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={COLORS.background}
+      />
       <Tab.Navigator
         screenOptions={({ route }) => ({
           headerShown: false,
@@ -66,20 +88,32 @@ export default function App() {
           tabBarActiveTintColor: COLORS.primary,
           tabBarInactiveTintColor: COLORS.textMuted,
           tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 2 },
-          tabBarIcon: ({ color, size, focused }) => {
+          tabBarIcon: ({ color, focused }) => {
             const icons = {
               Dashboard: focused ? 'view-dashboard' : 'view-dashboard-outline',
-              History: focused ? 'history' : 'history',
+              History: 'history',
               Analytics: focused ? 'chart-line' : 'chart-line-variant',
+              Trips: 'map-marker-path',
             };
             return <MaterialCommunityIcons name={icons[route.name] || 'circle'} size={24} color={color} />;
           },
         })}
       >
-        <Tab.Screen name="Dashboard" component={DashboardStack} />
+        <Tab.Screen name="Dashboard" component={DashboardStack} options={{ unmountOnBlur: true }} />
         <Tab.Screen name="History" component={HistoryStack} />
+        <Tab.Screen name="Trips" component={TripStack} />
         <Tab.Screen name="Analytics" component={AnalyticsStack} />
       </Tab.Navigator>
-    </NavigationContainer>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <NavigationContainer>
+        <AppTabs />
+      </NavigationContainer>
+    </ThemeProvider>
   );
 }

@@ -4,23 +4,26 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import { getMonthlyStats, getSettings, getStationStats, getTagStats, getDefaultBikeId } from '../database/db';
-import { COLORS, MONTHS, RIDE_TAGS, formatCurrency, getRideTagInfo } from '../constants';
+import { MONTHS, RIDE_TAGS, formatCurrency, getRideTagInfo } from '../constants';
+import { useTheme } from '../context/ThemeContext';
 import GlobalFAB from './GlobalFAB';
 
 const W = Dimensions.get('window').width - 32;
-const chartConfig = {
-  backgroundGradientFrom: COLORS.card,
-  backgroundGradientTo: COLORS.card,
-  color: (opacity = 1) => `rgba(255, 107, 53, ${opacity})`,
-  labelColor: (opacity = 1) => `rgba(168, 178, 196, ${opacity})`,
-  strokeWidth: 2,
-  barPercentage: 0.6,
-  decimalPlaces: 0,
-  propsForDots: { r: '4', strokeWidth: '2', stroke: COLORS.primary },
-  propsForBackgroundLines: { stroke: COLORS.border, strokeDasharray: '4' },
-};
-
 export default function AnalyticsScreen({ navigation }) {
+  const { COLORS } = useTheme();
+  const styles = makeStyles(COLORS);
+
+  const chartConfig = {
+    backgroundGradientFrom: COLORS.card,
+    backgroundGradientTo: COLORS.card,
+    color: (opacity = 1) => `rgba(255, 107, 53, ${opacity})`,
+    labelColor: (opacity = 1) => COLORS.textMuted,
+    strokeWidth: 2,
+    barPercentage: 0.6,
+    decimalPlaces: 0,
+    propsForDots: { r: '4', strokeWidth: '2', stroke: COLORS.primary },
+    propsForBackgroundLines: { stroke: COLORS.border, strokeDasharray: '4' },
+  };
   const [monthlyData, setMonthlyData] = useState([]);
   const [currency, setCurrency] = useState('BDT');
   const [loading, setLoading] = useState(true);
@@ -196,12 +199,12 @@ export default function AnalyticsScreen({ navigation }) {
         </>
       )}
     </ScrollView>
-    <GlobalFAB />
+    <GlobalFAB navigation={navigation} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 16 },
   header: { paddingTop: 20, paddingBottom: 16 },
   title: { fontSize: 26, fontWeight: '800', color: COLORS.text },

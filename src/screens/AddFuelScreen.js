@@ -3,9 +3,10 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert,
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { addFuelLog, getSettings, getLastOdometer, getDefaultBikeId } from '../database/db';
-import { COLORS, RIDE_TAGS, getTodayString, formatCurrency } from '../constants';
+import { RIDE_TAGS, getTodayString, formatCurrency } from '../constants';
+import { useTheme } from '../context/ThemeContext';
 
-const InputField = ({ label, value, onChangeText, keyboardType, placeholder, icon, required }) => (
+const InputField = ({ label, value, onChangeText, keyboardType, placeholder, icon, required, COLORS, styles }) => (
   <View style={styles.inputGroup}>
     <Text style={styles.inputLabel}>{label}{required && <Text style={{ color: COLORS.primary }}> *</Text>}</Text>
     <View style={styles.inputWrapper}>
@@ -23,6 +24,8 @@ const InputField = ({ label, value, onChangeText, keyboardType, placeholder, ico
 );
 
 export default function AddFuelScreen({ navigation }) {
+  const { COLORS } = useTheme();
+  const styles = makeStyles(COLORS);
   const [entryMethod, setEntryMethod] = useState('price');
   const [date, setDate] = useState(getTodayString());
   const [dateObj, setDateObj] = useState(new Date());
@@ -177,17 +180,17 @@ export default function AddFuelScreen({ navigation }) {
           </Modal>
         )}
 
-        <InputField label={entryMethod === 'price' ? `Amount Paid (${settings.currency})` : 'Litres Added'} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={entryMethod === 'price' ? 'e.g. 500' : 'e.g. 4.5'} icon={entryMethod === 'price' ? 'currency-bdt' : 'water'} required />
+        <InputField COLORS={COLORS} styles={styles} label={entryMethod === 'price' ? `Amount Paid (${settings.currency})` : 'Litres Added'} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={entryMethod === 'price' ? 'e.g. 500' : 'e.g. 4.5'} icon={entryMethod === 'price' ? 'currency-bdt' : 'water'} required />
 
-        <InputField label="Remaining Fuel Before Fill (L)" value={remainingFuel} onChangeText={setRemainingFuel} keyboardType="decimal-pad" placeholder="e.g. 1.5  (leave blank if 0)" icon="gauge" />
-        <InputField label="Odometer Reading (km)" value={odometer} onChangeText={setOdometer} keyboardType="decimal-pad" placeholder={lastOdometer > 0 ? `Last: ${lastOdometer} km` : 'e.g. 15240'} icon="counter" required />
+        <InputField COLORS={COLORS} styles={styles} label="Remaining Fuel Before Fill (L)" value={remainingFuel} onChangeText={setRemainingFuel} keyboardType="decimal-pad" placeholder="e.g. 1.5  (leave blank if 0)" icon="gauge" />
+        <InputField COLORS={COLORS} styles={styles} label="Odometer Reading (km)" value={odometer} onChangeText={setOdometer} keyboardType="decimal-pad" placeholder={lastOdometer > 0 ? `Last: ${lastOdometer} km` : 'e.g. 15240'} icon="counter" required />
 
         {lastOdometer > 0 && odometer && parseFloat(odometer) > lastOdometer && (
           <Text style={styles.distanceHint}>Distance since last fill: {(parseFloat(odometer) - lastOdometer).toFixed(0)} km</Text>
         )}
 
-        <InputField label="Fuel Station (optional)" value={stationName} onChangeText={setStationName} placeholder="e.g. Padma Filling Station" icon="map-marker" />
-        <InputField label="Notes (optional)" value={notes} onChangeText={setNotes} placeholder="Any notes..." icon="note-text" />
+        <InputField COLORS={COLORS} styles={styles} label="Fuel Station (optional)" value={stationName} onChangeText={setStationName} placeholder="e.g. Padma Filling Station" icon="map-marker" />
+        <InputField COLORS={COLORS} styles={styles} label="Notes (optional)" value={notes} onChangeText={setNotes} placeholder="Any notes..." icon="note-text" />
 
         {/* Ride Tag */}
         <View style={styles.inputGroup}>
@@ -216,7 +219,7 @@ export default function AddFuelScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 16 },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: 20, paddingBottom: 16 },
   backBtn: { padding: 8 },

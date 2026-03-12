@@ -53,7 +53,8 @@ const initSchema = (db) => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fuel_price REAL DEFAULT 108,
       currency TEXT DEFAULT 'BDT',
-      default_bike_id INTEGER DEFAULT 1
+      default_bike_id INTEGER DEFAULT 1,
+      theme TEXT DEFAULT 'dark'
     );
   `);
   db.execSync(`
@@ -67,10 +68,25 @@ const initSchema = (db) => {
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS trips (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bike_id INTEGER DEFAULT 1,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      start_odometer REAL NOT NULL,
+      end_odometer REAL,
+      notes TEXT,
+      ride_tag TEXT DEFAULT 'personal',
+      status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
 
-  // Migrations: add columns if they don't exist
+  // Migrations
   try { db.execSync(`ALTER TABLE fuel_logs ADD COLUMN ride_tag TEXT DEFAULT 'personal';`); } catch (_) {}
   try { db.execSync(`ALTER TABLE expenses ADD COLUMN ride_tag TEXT DEFAULT 'personal';`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE settings ADD COLUMN theme TEXT DEFAULT 'dark';`); } catch (_) {}
 
   const bikeCount = db.getFirstSync('SELECT COUNT(*) as cnt FROM bikes');
   if (bikeCount.cnt === 0) {
@@ -78,28 +94,29 @@ const initSchema = (db) => {
   }
   const settingsCount = db.getFirstSync('SELECT COUNT(*) as cnt FROM settings');
   if (settingsCount.cnt === 0) {
-    db.runSync('INSERT INTO settings (fuel_price, currency, default_bike_id) VALUES (?, ?, ?)', [108, 'BDT', 1]);
+    db.runSync('INSERT INTO settings (fuel_price, currency, default_bike_id, theme) VALUES (?, ?, ?, ?)', [108, 'BDT', 1, 'dark']);
   }
 };
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 export const getSettings = () => {
-  return getDb().getFirstSync('SELECT * FROM settings LIMIT 1') || { fuel_price: 108, currency: 'BDT', default_bike_id: 1 };
+  return getDb().getFirstSync('SELECT * FROM settings LIMIT 1') || { fuel_price: 108, currency: 'BDT', default_bike_id: 1, theme: 'dark' };
 };
 
-export const updateSettings = (fuelPrice, currency, defaultBikeId) => {
+export const updateSettings = (fuelPrice, currency, defaultBikeId, theme) => {
   getDb().runSync(
-    'UPDATE settings SET fuel_price = ?, currency = ?, default_bike_id = ?',
-    [fuelPrice, currency, defaultBikeId || 1]
+    'UPDATE settings SET fuel_price = ?, currency = ?, default_bike_id = ?, theme = ?',
+    [fuelPrice, currency, defaultBikeId || 1, theme || 'dark']
   );
 };
 
+export const getTheme = () => (getSettings().theme || 'dark');
+export const setTheme = (theme) => getDb().runSync('UPDATE settings SET theme = ?', [theme]);
+
 // ─── Bikes ────────────────────────────────────────────────────────────────────
 
-export const getBikes = () => {
-  return getDb().getAllSync('SELECT * FROM bikes ORDER BY created_at ASC');
-};
+export const getBikes = () => getDb().getAllSync('SELECT * FROM bikes ORDER BY created_at ASC');
 
 export const addBike = (bikeName, tankCapacity, notes) => {
   const result = getDb().runSync(
@@ -115,16 +132,12 @@ export const deleteBike = (id) => {
   db.runSync('DELETE FROM fuel_logs WHERE bike_id = ?', [id]);
   db.runSync('DELETE FROM expenses WHERE bike_id = ?', [id]);
   db.runSync('DELETE FROM service_reminders WHERE bike_id = ?', [id]);
+  db.runSync('DELETE FROM trips WHERE bike_id = ?', [id]);
 };
 
-export const setDefaultBike = (bikeId) => {
-  getDb().runSync('UPDATE settings SET default_bike_id = ?', [bikeId]);
-};
+export const setDefaultBike = (bikeId) => getDb().runSync('UPDATE settings SET default_bike_id = ?', [bikeId]);
 
-export const getDefaultBikeId = () => {
-  const s = getSettings();
-  return s.default_bike_id || 1;
-};
+export const getDefaultBikeId = () => (getSettings().default_bike_id || 1);
 
 // ─── Fuel Logs ────────────────────────────────────────────────────────────────
 
@@ -136,6 +149,15 @@ export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odo
   );
   return result.lastInsertRowId;
 };
+
+export const updateFuelLog = ({ id, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag }) => {
+  getDb().runSync(
+    `UPDATE fuel_logs SET date=?, litres=?, price_per_litre=?, total_cost=?, odometer=?, station_name=?, notes=?, ride_tag=? WHERE id=?`,
+    [date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal', id]
+  );
+};
+
+export const getFuelLogById = (id) => getDb().getFirstSync('SELECT * FROM fuel_logs WHERE id = ?', [id]) || null;
 
 export const getFuelLogs = (bikeId = 1, limit = 100) => {
   return getDb().getAllSync(
@@ -159,27 +181,23 @@ export const getLastOdometer = (bikeId = 1) => {
   return row?.odometer || 0;
 };
 
-export const deleteFuelLog = (id) => {
-  getDb().runSync('DELETE FROM fuel_logs WHERE id = ?', [id]);
-};
+export const deleteFuelLog = (id) => getDb().runSync('DELETE FROM fuel_logs WHERE id = ?', [id]);
 
 // ─── Station Mileage Tracking ─────────────────────────────────────────────────
 
 export const getStationStats = (bikeId = 1) => {
   const db = getDb();
-  // Get all fills with station names, ordered by odometer
   const logs = db.getAllSync(
     `SELECT * FROM fuel_logs WHERE bike_id = ? AND station_name != '' ORDER BY odometer ASC`,
     [bikeId]
   );
-
   const stationMap = {};
   for (let i = 1; i < logs.length; i++) {
     const prev = logs[i - 1];
     const curr = logs[i];
     const dist = curr.odometer - prev.odometer;
     const mileage = curr.litres > 0 ? dist / curr.litres : 0;
-    if (mileage > 5 && mileage < 120) { // sanity filter
+    if (mileage > 5 && mileage < 120) {
       const name = curr.station_name;
       if (!stationMap[name]) stationMap[name] = { name, fills: 0, totalMileage: 0, avgMileage: 0 };
       stationMap[name].fills++;
@@ -202,6 +220,15 @@ export const addExpense = ({ bikeId, date, category, cost, notes, rideTag }) => 
   return result.lastInsertRowId;
 };
 
+export const updateExpense = ({ id, date, category, cost, notes, rideTag }) => {
+  getDb().runSync(
+    `UPDATE expenses SET date=?, category=?, cost=?, notes=?, ride_tag=? WHERE id=?`,
+    [date, category, cost, notes || '', rideTag || 'personal', id]
+  );
+};
+
+export const getExpenseById = (id) => getDb().getFirstSync('SELECT * FROM expenses WHERE id = ?', [id]) || null;
+
 export const getExpenses = (bikeId = 1, limit = 100) => {
   return getDb().getAllSync(
     'SELECT * FROM expenses WHERE bike_id = ? ORDER BY date DESC, created_at DESC LIMIT ?',
@@ -209,9 +236,7 @@ export const getExpenses = (bikeId = 1, limit = 100) => {
   );
 };
 
-export const deleteExpense = (id) => {
-  getDb().runSync('DELETE FROM expenses WHERE id = ?', [id]);
-};
+export const deleteExpense = (id) => getDb().runSync('DELETE FROM expenses WHERE id = ?', [id]);
 
 // ─── Service Reminders ────────────────────────────────────────────────────────
 
@@ -234,9 +259,40 @@ export const updateReminderServiceKm = (id, newKm) => {
   getDb().runSync('UPDATE service_reminders SET last_service_km = ? WHERE id = ?', [newKm, id]);
 };
 
-export const deleteServiceReminder = (id) => {
-  getDb().runSync('DELETE FROM service_reminders WHERE id = ?', [id]);
+export const deleteServiceReminder = (id) => getDb().runSync('DELETE FROM service_reminders WHERE id = ?', [id]);
+
+// ─── Trips ────────────────────────────────────────────────────────────────────
+
+export const addTrip = ({ bikeId, title, date, startOdometer, notes, rideTag }) => {
+  const result = getDb().runSync(
+    `INSERT INTO trips (bike_id, title, date, start_odometer, notes, ride_tag, status) VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+    [bikeId || 1, title, date, startOdometer, notes || '', rideTag || 'personal']
+  );
+  return result.lastInsertRowId;
 };
+
+export const endTrip = (id, endOdometer) => {
+  getDb().runSync(
+    `UPDATE trips SET end_odometer = ?, status = 'completed' WHERE id = ?`,
+    [endOdometer, id]
+  );
+};
+
+export const getTrips = (bikeId = 1, limit = 100) => {
+  return getDb().getAllSync(
+    'SELECT * FROM trips WHERE bike_id = ? ORDER BY created_at DESC LIMIT ?',
+    [bikeId, limit]
+  );
+};
+
+export const getActiveTrip = (bikeId = 1) => {
+  return getDb().getFirstSync(
+    `SELECT * FROM trips WHERE bike_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
+    [bikeId]
+  ) || null;
+};
+
+export const deleteTrip = (id) => getDb().runSync('DELETE FROM trips WHERE id = ?', [id]);
 
 // ─── Monthly Stats ────────────────────────────────────────────────────────────
 
@@ -302,13 +358,7 @@ export const getTagStats = (bikeId = 1, year, month) => {
 
 export const getAllDataForExport = (bikeId = 1) => {
   const db = getDb();
-  const fuelLogs = db.getAllSync(
-    'SELECT * FROM fuel_logs WHERE bike_id = ? ORDER BY date DESC',
-    [bikeId]
-  );
-  const expenses = db.getAllSync(
-    'SELECT * FROM expenses WHERE bike_id = ? ORDER BY date DESC',
-    [bikeId]
-  );
+  const fuelLogs = db.getAllSync('SELECT * FROM fuel_logs WHERE bike_id = ? ORDER BY date DESC', [bikeId]);
+  const expenses = db.getAllSync('SELECT * FROM expenses WHERE bike_id = ? ORDER BY date DESC', [bikeId]);
   return { fuelLogs, expenses };
 };
