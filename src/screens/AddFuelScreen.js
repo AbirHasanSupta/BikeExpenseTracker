@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addFuelLog, getSettings, getLastOdometer } from '../database/db';
 import { COLORS, getTodayString, formatCurrency } from '../constants';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 const InputField = ({ label, value, onChangeText, keyboardType, placeholder, icon, required }) => (
   <View style={styles.inputGroup}>
@@ -31,6 +32,7 @@ export default function AddFuelScreen({ navigation }) {
   const [settings, setSettings] = useState({ fuel_price: 108, currency: 'BDT' });
   const [lastOdometer, setLastOdometer] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     setSettings(getSettings());
@@ -98,7 +100,28 @@ export default function AddFuelScreen({ navigation }) {
           </View>
         )}
 
-        <InputField label="Date" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" icon="calendar" required />
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Date<Text style={{ color: COLORS.primary }}> *</Text></Text>
+          <TouchableOpacity style={styles.inputWrapper} onPress={() => setShowDatePicker(true)}>
+            <MaterialCommunityIcons name="calendar" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
+            <View style={[styles.input, { paddingLeft: 40, justifyContent: 'center' }]}>
+              <Text style={{ color: COLORS.text, fontSize: 15 }}>{date}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {showDatePicker && (
+          <DateTimePicker
+            value={new Date(date)}
+            mode="date"
+            display="default"
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(false);
+              if (selectedDate) setDate(selectedDate.toISOString().split('T')[0]);
+            }}
+          />
+        )}
+
         <InputField label={entryMethod === 'price' ? `Amount Paid (${settings.currency})` : 'Litres Added'} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={entryMethod === 'price' ? 'e.g. 500' : 'e.g. 4.5'} icon={entryMethod === 'price' ? 'currency-bdt' : 'water'} required />
         <InputField label="Odometer Reading (km)" value={odometer} onChangeText={setOdometer} keyboardType="decimal-pad" placeholder={lastOdometer > 0 ? `Last: ${lastOdometer} km` : 'e.g. 15240'} icon="counter" required />
 

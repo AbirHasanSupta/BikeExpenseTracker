@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { addExpense, getSettings } from '../database/db';
 import { COLORS, EXPENSE_CATEGORIES, getTodayString, formatCurrency } from '../constants';
 
@@ -11,6 +12,7 @@ export default function AddExpenseScreen({ navigation }) {
   const [notes, setNotes] = useState('');
   const [settings, setSettings] = useState({ currency: 'BDT' });
   const [saving, setSaving] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => { setSettings(getSettings()); }, []);
 
@@ -58,11 +60,25 @@ export default function AddExpenseScreen({ navigation }) {
 
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Date <Text style={{ color: COLORS.primary }}>*</Text></Text>
-          <View style={styles.inputWrapper}>
+          <TouchableOpacity style={styles.inputWrapper} onPress={() => setShowDatePicker(true)}>
             <MaterialCommunityIcons name="calendar" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
-            <TextInput style={[styles.input, { paddingLeft: 40 }]} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={COLORS.textMuted} />
-          </View>
+            <View style={[styles.input, { paddingLeft: 40, justifyContent: 'center' }]}>
+              <Text style={{ color: COLORS.text, fontSize: 15 }}>{date}</Text>
+            </View>
+          </TouchableOpacity>
         </View>
+
+        {showDatePicker && (
+          <DateTimePicker
+            value={new Date(date)}
+            mode="date"
+            display="default"
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(false);
+              if (selectedDate) setDate(selectedDate.toISOString().split('T')[0]);
+            }}
+          />
+        )}
 
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Cost ({settings.currency}) <Text style={{ color: COLORS.primary }}>*</Text></Text>
