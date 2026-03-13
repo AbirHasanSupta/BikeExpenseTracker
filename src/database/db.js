@@ -196,7 +196,7 @@ export const getStationStats = (bikeId = 1) => {
     const prev = logs[i - 1];
     const curr = logs[i];
     const dist = curr.odometer - prev.odometer;
-    const mileage = curr.litres > 0 ? dist / curr.litres : 0;
+    const mileage = prev.litres > 0 ? dist / prev.litres : 0;
     if (mileage > 5 && mileage < 120) {
       const name = curr.station_name;
       if (!stationMap[name]) stationMap[name] = { name, fills: 0, totalMileage: 0, avgMileage: 0 };
@@ -315,8 +315,22 @@ export const getMonthlyStats = (bikeId = 1, year, month) => {
   const totalFuelCost = fuel.total_fuel_cost || 0;
   const totalMaintenance = expense.total_maintenance || 0;
   const totalLitres = fuel.total_litres || 0;
-  const distance = (fuel.max_odo && fuel.min_odo) ? (fuel.max_odo - fuel.min_odo) : 0;
-  const mileage = totalLitres > 0 && distance > 0 ? distance / totalLitres : 0;
+  const prevFill = db.getFirstSync(
+    `SELECT odometer, litres FROM fuel_logs WHERE bike_id = ? AND date < ? ORDER BY date DESC, created_at DESC LIMIT 1`,
+    [bikeId, `${monthStr}-01`]
+  );
+
+  const startOdo = prevFill?.odometer ?? fuel.min_odo ?? 0;
+  const endOdo = fuel.max_odo ?? 0;
+  const distance = endOdo > startOdo ? endOdo - startOdo : 0;
+
+  const lastFill = db.getFirstSync(
+    `SELECT litres FROM fuel_logs WHERE bike_id = ? AND date LIKE ? ORDER BY date DESC, created_at DESC LIMIT 1`,
+    [bikeId, `${monthStr}%`]
+  );
+  const litresForMileage = totalLitres - (lastFill?.litres ?? 0) + (prevFill?.litres ?? 0);
+  const mileage = litresForMileage > 0 && distance > 0 ? distance / litresForMileage : 0;
+
   const costPerKm = distance > 0 ? (totalFuelCost + totalMaintenance) / distance : 0;
 
   return { totalFuelCost, totalMaintenance, totalCost: totalFuelCost + totalMaintenance, totalLitres, distance, mileage, costPerKm };
