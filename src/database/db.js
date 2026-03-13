@@ -96,6 +96,12 @@ const initSchema = (db) => {
   if (settingsCount.cnt === 0) {
     db.runSync('INSERT INTO settings (fuel_price, currency, default_bike_id, theme) VALUES (?, ?, ?, ?)', [108, 'BDT', 1, 'dark']);
   }
+
+  // Add to the Migrations section in initSchema:
+  try { db.execSync(`ALTER TABLE trips ADD COLUMN avg_mileage REAL DEFAULT 0;`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE trips ADD COLUMN total_fuel_litres REAL DEFAULT 0;`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE trips ADD COLUMN total_fuel_cost REAL DEFAULT 0;`); } catch (_) {}
+
 };
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -272,9 +278,20 @@ export const addTrip = ({ bikeId, title, date, startOdometer, notes, rideTag }) 
 };
 
 export const endTrip = (id, endOdometer) => {
-  getDb().runSync(
-    `UPDATE trips SET end_odometer = ?, status = 'completed' WHERE id = ?`,
-    [endOdometer, id]
+  const db = getDb();
+  const trip = db.getFirstSync('SELECT * FROM trips WHERE id = ?', [id]);
+  if (!trip) return;
+
+  const now = new Date();
+  const { mileage: avgMileage } = getMonthlyStats(trip.bike_id, now.getFullYear(), now.getMonth() + 1);
+  const distance = endOdometer - trip.start_odometer;
+  const fuelPrice = db.getFirstSync('SELECT fuel_price FROM settings LIMIT 1')?.fuel_price || 108;
+  const totalFuelLitres = avgMileage > 0 ? distance / avgMileage : 0;
+  const totalFuelCost = totalFuelLitres * fuelPrice;
+
+  db.runSync(
+    `UPDATE trips SET end_odometer = ?, status = 'completed', avg_mileage = ?, total_fuel_litres = ?, total_fuel_cost = ? WHERE id = ?`,
+    [endOdometer, avgMileage, totalFuelLitres, totalFuelCost, id]
   );
 };
 

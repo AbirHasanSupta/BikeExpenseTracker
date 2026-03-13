@@ -101,6 +101,23 @@ export default function TripScreen() {
           </View>
         </View>
 
+        {!isActive && item.avg_mileage > 0 && (
+          <View style={styles.tripFuelStats}>
+            <View style={styles.tripFuelItem}>
+              <MaterialCommunityIcons name="speedometer" size={13} color={COLORS.accent} />
+              <Text style={styles.tripFuelText}>{item.avg_mileage.toFixed(1)} km/L</Text>
+            </View>
+            <View style={styles.tripFuelItem}>
+              <MaterialCommunityIcons name="water" size={13} color={COLORS.accentBlue} />
+              <Text style={styles.tripFuelText}>{item.total_fuel_litres?.toFixed(2)} L</Text>
+            </View>
+            <View style={styles.tripFuelItem}>
+              <MaterialCommunityIcons name="currency-bdt" size={13} color={COLORS.accentGreen} />
+              <Text style={styles.tripFuelText}>{item.total_fuel_cost?.toFixed(0)} tk</Text>
+            </View>
+          </View>
+        )}
+
         <View style={styles.tripBottom}>
           <View style={[styles.tagBadge, { backgroundColor: tag.color + '22' }]}>
             <MaterialCommunityIcons name={tag.icon} size={10} color={tag.color} />
@@ -283,4 +300,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   cancelBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.textMuted },
   confirmBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   confirmBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
+  tripFuelStats: { flexDirection: 'row', gap: 16, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
+  tripFuelItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  tripFuelText: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
 });

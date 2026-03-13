@@ -134,7 +134,7 @@ export default function SettingsScreen({ navigation }) {
     try {
       const { fuelLogs, expenses } = getAllDataForExport(activeBikeId);
       const activeBike = bikes.find(b => b.id === activeBikeId);
-      let csv = `Bike Expense Tracker Export\nBike: ${activeBike?.bike_name || 'Unknown'}\n\n`;
+      let csv = `MotoLog Export\nBike: ${activeBike?.bike_name || 'Unknown'}\n\n`;
       csv += 'FUEL LOGS\nDate,Litres,Price/L,Total Cost,Odometer,Station,Notes,Tag\n';
       for (const log of fuelLogs) {
         csv += `${log.date},${log.litres},${log.price_per_litre},${log.total_cost},${log.odometer},"${log.station_name || ''}","${log.notes || ''}",${log.ride_tag || 'personal'}\n`;
