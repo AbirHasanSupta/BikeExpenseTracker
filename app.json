@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Bike Expense Tracker",
-    "slug": "BikeExpenseTracker",
+    "name": "MotoLog",
+    "slug": "MotoLog",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -21,7 +21,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "newArchEnabled": true
+      "newArchEnabled": true,
+      "package": "com.abirsupta.MotoLog"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -40,6 +41,12 @@
           "color": "#FF6B35"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d1ec008c-cb9f-40e2-9e26-c5d0d4db4fa5"
+      }
+    },
+    "owner": "abirsupta"
   }
 }
