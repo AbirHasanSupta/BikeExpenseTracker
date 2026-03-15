@@ -52,8 +52,11 @@ export default function AddFuelScreen({ navigation }) {
   const fuelPrice = parseFloat(settings.fuel_price) || 108;
   const amountNum = parseFloat(amount) || 0;
   const remainingNum = parseFloat(remainingFuel) || 0;
+
+  // newLitres = only what was purchased this fill
   const newLitres = entryMethod === 'price' ? amountNum / fuelPrice : amountNum;
-  const litres = newLitres + remainingNum;
+  // totalInTank = purchased + already in tank (for display only)
+  const totalInTank = newLitres + remainingNum;
   const totalCost = entryMethod === 'price' ? amountNum : amountNum * fuelPrice;
 
   const handleSave = () => {
@@ -61,19 +64,20 @@ export default function AddFuelScreen({ navigation }) {
     if (parseFloat(odometer) < lastOdometer && lastOdometer > 0) {
       Alert.alert('Check Odometer', `Last reading was ${lastOdometer} km. Current reading seems lower.`); return;
     }
-    if (litres <= 0 || totalCost <= 0) { Alert.alert('Invalid Entry', 'Please enter a valid fuel amount.'); return; }
+    if (newLitres <= 0 || totalCost <= 0) { Alert.alert('Invalid Entry', 'Please enter a valid fuel amount.'); return; }
     try {
       setSaving(true);
       addFuelLog({
         bikeId,
         date,
-        litres: parseFloat(litres.toFixed(3)),
+        litres: parseFloat(newLitres.toFixed(3)),   // purchased litres only
         pricePerLitre: fuelPrice,
         totalCost: parseFloat(totalCost.toFixed(2)),
         odometer: parseFloat(odometer),
         stationName,
         notes,
         rideTag,
+        remainingFuel: remainingNum,                 // remaining before fill, saved separately
       });
       Alert.alert('Saved!', 'Fuel entry added successfully.', [
         { text: 'Add Another', onPress: () => { setAmount(''); setOdometer(''); setStationName(''); setNotes(''); setRemainingFuel(''); setSaving(false); } },
@@ -113,8 +117,8 @@ export default function AddFuelScreen({ navigation }) {
             </View>
             <View style={styles.previewDivider} />
             <View style={styles.previewItem}>
-              <Text style={styles.previewLabel}>Total in Tank</Text>
-              <Text style={[styles.previewValue, { color: COLORS.accentGreen }]}>{litres.toFixed(2)} L</Text>
+              <Text style={styles.previewLabel}>In Tank</Text>
+              <Text style={[styles.previewValue, { color: COLORS.accentGreen }]}>{totalInTank.toFixed(2)} L</Text>
             </View>
             <View style={styles.previewDivider} />
             <View style={styles.previewItem}>

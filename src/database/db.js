@@ -33,6 +33,7 @@ const initSchema = (db) => {
       station_name TEXT,
       notes TEXT,
       ride_tag TEXT DEFAULT 'personal',
+      remaining_fuel REAL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
@@ -87,6 +88,11 @@ const initSchema = (db) => {
   try { db.execSync(`ALTER TABLE fuel_logs ADD COLUMN ride_tag TEXT DEFAULT 'personal';`); } catch (_) {}
   try { db.execSync(`ALTER TABLE expenses ADD COLUMN ride_tag TEXT DEFAULT 'personal';`); } catch (_) {}
   try { db.execSync(`ALTER TABLE settings ADD COLUMN theme TEXT DEFAULT 'dark';`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE trips ADD COLUMN avg_mileage REAL DEFAULT 0;`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE trips ADD COLUMN total_fuel_litres REAL DEFAULT 0;`); } catch (_) {}
+  try { db.execSync(`ALTER TABLE trips ADD COLUMN total_fuel_cost REAL DEFAULT 0;`); } catch (_) {}
+  // New migration: remaining_fuel column
+  try { db.execSync(`ALTER TABLE fuel_logs ADD COLUMN remaining_fuel REAL DEFAULT 0;`); } catch (_) {}
 
   const bikeCount = db.getFirstSync('SELECT COUNT(*) as cnt FROM bikes');
   if (bikeCount.cnt === 0) {
@@ -96,12 +102,6 @@ const initSchema = (db) => {
   if (settingsCount.cnt === 0) {
     db.runSync('INSERT INTO settings (fuel_price, currency, default_bike_id, theme) VALUES (?, ?, ?, ?)', [108, 'BDT', 1, 'dark']);
   }
-
-  // Add to the Migrations section in initSchema:
-  try { db.execSync(`ALTER TABLE trips ADD COLUMN avg_mileage REAL DEFAULT 0;`); } catch (_) {}
-  try { db.execSync(`ALTER TABLE trips ADD COLUMN total_fuel_litres REAL DEFAULT 0;`); } catch (_) {}
-  try { db.execSync(`ALTER TABLE trips ADD COLUMN total_fuel_cost REAL DEFAULT 0;`); } catch (_) {}
-
 };
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -147,19 +147,19 @@ export const getDefaultBikeId = () => (getSettings().default_bike_id || 1);
 
 // ─── Fuel Logs ────────────────────────────────────────────────────────────────
 
-export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag }) => {
+export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag, remainingFuel }) => {
   const result = getDb().runSync(
-    `INSERT INTO fuel_logs (bike_id, date, litres, price_per_litre, total_cost, odometer, station_name, notes, ride_tag)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [bikeId || 1, date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal']
+    `INSERT INTO fuel_logs (bike_id, date, litres, price_per_litre, total_cost, odometer, station_name, notes, ride_tag, remaining_fuel)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [bikeId || 1, date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal', remainingFuel || 0]
   );
   return result.lastInsertRowId;
 };
 
-export const updateFuelLog = ({ id, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag }) => {
+export const updateFuelLog = ({ id, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag, remainingFuel }) => {
   getDb().runSync(
-    `UPDATE fuel_logs SET date=?, litres=?, price_per_litre=?, total_cost=?, odometer=?, station_name=?, notes=?, ride_tag=? WHERE id=?`,
-    [date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal', id]
+    `UPDATE fuel_logs SET date=?, litres=?, price_per_litre=?, total_cost=?, odometer=?, station_name=?, notes=?, ride_tag=?, remaining_fuel=? WHERE id=?`,
+    [date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal', remainingFuel || 0, id]
   );
 };
 
@@ -202,7 +202,9 @@ export const getStationStats = (bikeId = 1) => {
     const prev = logs[i - 1];
     const curr = logs[i];
     const dist = curr.odometer - prev.odometer;
-    const mileage = prev.litres > 0 ? dist / prev.litres : 0;
+    // Use prev purchased litres + prev remaining for accurate mileage
+    const effectiveLitres = (prev.litres || 0) + (prev.remaining_fuel || 0);
+    const mileage = effectiveLitres > 0 ? dist / effectiveLitres : 0;
     if (mileage > 5 && mileage < 120) {
       const name = curr.station_name;
       if (!stationMap[name]) stationMap[name] = { name, fills: 0, totalMileage: 0, avgMileage: 0 };
@@ -332,8 +334,10 @@ export const getMonthlyStats = (bikeId = 1, year, month) => {
   const totalFuelCost = fuel.total_fuel_cost || 0;
   const totalMaintenance = expense.total_maintenance || 0;
   const totalLitres = fuel.total_litres || 0;
+
+  // Previous month's last fill — needed as starting fuel for mileage calc
   const prevFill = db.getFirstSync(
-    `SELECT odometer, litres FROM fuel_logs WHERE bike_id = ? AND date < ? ORDER BY date DESC, created_at DESC LIMIT 1`,
+    `SELECT odometer, litres, remaining_fuel FROM fuel_logs WHERE bike_id = ? AND date < ? ORDER BY date DESC, created_at DESC LIMIT 1`,
     [bikeId, `${monthStr}-01`]
   );
 
@@ -341,13 +345,29 @@ export const getMonthlyStats = (bikeId = 1, year, month) => {
   const endOdo = fuel.max_odo ?? 0;
   const distance = endOdo > startOdo ? endOdo - startOdo : 0;
 
+  // Last fill of this month — its fuel is still in the tank (not yet consumed)
   const lastFill = db.getFirstSync(
-    `SELECT litres FROM fuel_logs WHERE bike_id = ? AND date LIKE ? ORDER BY date DESC, created_at DESC LIMIT 1`,
+    `SELECT litres, remaining_fuel FROM fuel_logs WHERE bike_id = ? AND date LIKE ? ORDER BY date DESC, created_at DESC LIMIT 1`,
     [bikeId, `${monthStr}%`]
   );
-  const litresForMileage = totalLitres - (lastFill?.litres ?? 0) + (prevFill?.litres ?? 0);
-  const mileage = litresForMileage > 0 && distance > 0 ? distance / litresForMileage : 0;
 
+  // Fuel consumed this month:
+  //   + all purchased this month
+  //   + prev fill's litres & remaining (was in tank at month start, now burned)
+  //   - last fill's purchased litres (still in tank, not yet burned)
+  //   - last fill's remaining (also still in tank)
+  const lastFillLitres    = lastFill?.litres ?? 0;
+  const lastFillRemaining = lastFill?.remaining_fuel ?? 0;
+  const prevFillLitres    = prevFill?.litres ?? 0;
+  const prevFillRemaining = prevFill?.remaining_fuel ?? 0;
+
+  const litresForMileage = totalLitres
+    - lastFillLitres
+    - lastFillRemaining
+    + prevFillLitres
+    + prevFillRemaining;
+
+  const mileage = litresForMileage > 0 && distance > 0 ? distance / litresForMileage : 0;
   const costPerKm = distance > 0 ? (totalFuelCost + totalMaintenance) / distance : 0;
 
   return { totalFuelCost, totalMaintenance, totalCost: totalFuelCost + totalMaintenance, totalLitres, distance, mileage, costPerKm };

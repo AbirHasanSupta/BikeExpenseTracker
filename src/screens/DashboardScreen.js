@@ -86,7 +86,6 @@ export default function DashboardScreen({ navigation }) {
     setLoading(true);
     setActiveBikeId(bike.id);
     setActiveBike(bike);
-    // Force reload with new bike
     try {
       const st = getSettings();
       const s = getMonthlyStats(bike.id, selectedYear, selectedMonth);
@@ -105,15 +104,15 @@ export default function DashboardScreen({ navigation }) {
 
   const cur = settings.currency;
 
-  // Tank range estimation
+  // Tank capacity from active bike
   const tankCapacity = activeBike?.tank_capacity || 12;
   const avgMileage = stats?.mileage || 0;
+
+  // Full tank range = tank capacity × avg mileage
   const estimatedRange = avgMileage > 0 ? (tankCapacity * avgMileage).toFixed(0) : null;
-  const lastLitres = lastFuelLog?.litres || 0;
-  const fuelSinceLast = stats?.totalLitres || 0;
-  // Rough estimate of remaining fuel based on tank capacity minus fuel since last fill
-  const approxRemainingFuel = Math.max(0, tankCapacity - (fuelSinceLast % tankCapacity));
-  const approxRemainingRange = avgMileage > 0 ? (approxRemainingFuel * avgMileage).toFixed(0) : null;
+
+  // Total fuel in tank after last refill = purchased litres + remaining fuel that was already there
+  const totalFuelInTank = (lastFuelLog?.litres || 0) + (lastFuelLog?.remaining_fuel || 0);
 
   // Due service reminders
   const dueReminders = reminders.filter(r => {
@@ -209,17 +208,27 @@ export default function DashboardScreen({ navigation }) {
                   </View>
                   <View style={styles.rangeDivider} />
                   <View style={styles.rangeItem}>
-                    <MaterialCommunityIcons name="map-marker-distance" size={22} color={COLORS.accentGreen} />
-                    <Text style={[styles.rangeValue, { color: COLORS.accentGreen }]}>
-                      ~{approxRemainingRange} km
+                    <MaterialCommunityIcons name="water" size={22} color={COLORS.accentBlue} />
+                    <Text style={[styles.rangeValue, { color: COLORS.accentBlue }]}>
+                      {totalFuelInTank > 0 ? `${totalFuelInTank.toFixed(2)} L` : '—'}
                     </Text>
-                    <Text style={styles.rangeLabel}>Est. Remaining</Text>
+                    <Text style={styles.rangeLabel}>In Tank</Text>
                   </View>
                   <View style={styles.rangeDivider} />
                   <View style={styles.rangeItem}>
                     <MaterialCommunityIcons name="speedometer" size={22} color={COLORS.accent} />
                     <Text style={[styles.rangeValue, { color: COLORS.accent }]}>{avgMileage.toFixed(1)} km/L</Text>
                     <Text style={styles.rangeLabel}>Avg Mileage</Text>
+                  </View>
+                  <View style={styles.rangeDivider} />
+                  <View style={styles.rangeItem}>
+                    <MaterialCommunityIcons name="map-marker-check" size={22} color={COLORS.accentGreen} />
+                    <Text style={[styles.rangeValue, { color: COLORS.accentGreen }]}>
+                      {avgMileage > 0 && totalFuelInTank > 0
+                        ? `${Math.round(avgMileage * totalFuelInTank + (lastFuelLog?.odometer || 0))} km`
+                        : '—'}
+                    </Text>
+                    <Text style={styles.rangeLabel}>Next Refill</Text>
                   </View>
                 </View>
               </>
@@ -244,7 +253,9 @@ export default function DashboardScreen({ navigation }) {
                 <View style={styles.lastRefuelCard}>
                   {[
                     ['Date', formatDate(lastFuelLog.date)],
-                    ['Litres', `${lastFuelLog.litres.toFixed(2)} L`],
+                    ['Purchased', `${lastFuelLog.litres.toFixed(2)} L`],
+                    lastFuelLog.remaining_fuel > 0 ? ['Was in Tank', `${lastFuelLog.remaining_fuel.toFixed(2)} L`] : null,
+                    ['Total in Tank', `${totalFuelInTank.toFixed(2)} L`],
                     ['Cost', formatCurrency(lastFuelLog.total_cost, cur)],
                     ['Odometer', `${lastFuelLog.odometer.toLocaleString()} km`],
                     lastFuelLog.station_name ? ['Station', lastFuelLog.station_name] : null,
@@ -331,7 +342,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
 
   rangeCard: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: COLORS.accentGreen + '40' },
   rangeItem: { flex: 1, alignItems: 'center', gap: 4 },
-  rangeValue: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginTop: 4 },
+  rangeValue: { fontSize: 13, fontWeight: '800', color: COLORS.text, marginTop: 4 },
   rangeLabel: { fontSize: 10, color: COLORS.textMuted, textTransform: 'uppercase', textAlign: 'center' },
   rangeDivider: { width: 1, backgroundColor: COLORS.border, marginHorizontal: 4 },
 
@@ -348,10 +359,6 @@ const makeStyles = (COLORS) => StyleSheet.create({
   lastRefuelRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   lastRefuelLabel: { fontSize: 13, color: COLORS.textMuted },
   lastRefuelValue: { fontSize: 13, fontWeight: '600', color: COLORS.text },
-
-  quickActions: { flexDirection: 'row', gap: 12, marginBottom: 6 },
-  quickBtn: { flex: 1, borderRadius: 16, padding: 18, alignItems: 'center', gap: 8, elevation: 5 },
-  quickBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
 
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
