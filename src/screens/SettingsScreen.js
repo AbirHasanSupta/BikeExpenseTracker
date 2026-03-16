@@ -7,6 +7,7 @@ import {
   getLastOdometer, getAllDataForExport,
 } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
+import { useBackup } from '../context/BackupContext';          // ← NEW
 import { checkAndNotifyReminders } from '../utils/notifications';
 import { formatDate } from '../constants';
 
@@ -20,6 +21,9 @@ const DEFAULT_REMINDERS = [
 export default function SettingsScreen({ navigation }) {
   const { COLORS, theme, toggleTheme } = useTheme();
   const styles = makeStyles(COLORS);
+
+  // ── Backup context ─────────────────────────────────────────────────────────
+  const { user, isSignedIn, isBacking, lastBackupTime, backupNow } = useBackup();
 
   const [fuelPrice, setFuelPrice] = useState('108');
   const [currency, setCurrency] = useState('BDT');
@@ -50,7 +54,6 @@ export default function SettingsScreen({ navigation }) {
     setReminders(rems);
     const odo = getLastOdometer(bikeId);
     setCurrentOdometer(odo);
-    // Check and send notifications for due reminders
     checkAndNotifyReminders(rems, odo);
   };
 
@@ -185,6 +188,73 @@ export default function SettingsScreen({ navigation }) {
               thumbColor={theme === 'light' ? COLORS.primary : COLORS.textMuted}
             />
           </View>
+        </View>
+      </View>
+
+      {/* ── Cloud Backup ──────────────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Cloud Backup</Text>
+        <View style={styles.card}>
+          {isSignedIn ? (
+            <>
+              {/* Signed-in summary */}
+              <View style={styles.backupAccountRow}>
+                <View style={styles.driveIconBadge}>
+                  <MaterialCommunityIcons name="google-drive" size={20} color="#4285F4" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.backupAccountName}>{user?.name}</Text>
+                  <Text style={styles.backupAccountEmail}>{user?.email}</Text>
+                </View>
+                <View style={styles.connectedBadge}>
+                  <MaterialCommunityIcons name="check-circle" size={11} color={COLORS.accentGreen} />
+                  <Text style={[styles.connectedText, { color: COLORS.accentGreen }]}>CONNECTED</Text>
+                </View>
+              </View>
+
+              {lastBackupTime && (
+                <Text style={styles.backupTimestamp}>
+                  Last backup: {new Date(lastBackupTime).toLocaleString()}
+                </Text>
+              )}
+
+              <View style={styles.backupBtnRow}>
+                <TouchableOpacity
+                  style={[styles.backupNowBtn, isBacking && { opacity: 0.6 }]}
+                  onPress={backupNow}
+                  disabled={isBacking}
+                >
+                  <MaterialCommunityIcons
+                    name={isBacking ? 'loading' : 'cloud-upload-outline'}
+                    size={15}
+                    color={COLORS.white}
+                  />
+                  <Text style={styles.backupNowText}>{isBacking ? 'Backing up…' : 'Backup Now'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.manageBtn}
+                  onPress={() => navigation.navigate('Backup')}
+                >
+                  <MaterialCommunityIcons name="cog-outline" size={15} color={COLORS.textSecondary} />
+                  <Text style={styles.manageBtnText}>Manage</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.backupDesc}>
+                Back up your bikes, fuel logs, expenses, and trips to Google Drive. Restore on any device.
+              </Text>
+              <TouchableOpacity
+                style={styles.setupBackupBtn}
+                onPress={() => navigation.navigate('Backup')}
+              >
+                <MaterialCommunityIcons name="google-drive" size={18} color="#fff" />
+                <Text style={styles.setupBackupText}>Set Up Cloud Backup</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
 
@@ -369,11 +439,30 @@ const makeStyles = (COLORS) => StyleSheet.create({
   sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
   sectionSubtitle: { fontSize: 11, color: COLORS.textMuted },
   card: { backgroundColor: COLORS.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: COLORS.border },
+
   // Theme toggle
   themeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   themeLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   themeLabel: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   themeSubLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
+
+  // ── Backup styles ──────────────────────────────────────────────────────────
+  backupAccountRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  driveIconBadge: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#4285F422', alignItems: 'center', justifyContent: 'center' },
+  backupAccountName: { fontSize: 13, fontWeight: '700', color: COLORS.text },
+  backupAccountEmail: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
+  connectedBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: COLORS.accentGreen + '22', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  connectedText: { fontSize: 9, fontWeight: '800' },
+  backupTimestamp: { fontSize: 11, color: COLORS.textMuted, marginBottom: 12 },
+  backupBtnRow: { flexDirection: 'row', gap: 10 },
+  backupNowBtn: { flex: 1, backgroundColor: COLORS.primary, borderRadius: 10, padding: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  backupNowText: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  manageBtn: { flex: 1, borderRadius: 10, padding: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.background },
+  manageBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
+  backupDesc: { fontSize: 13, color: COLORS.textMuted, marginBottom: 14, lineHeight: 20 },
+  setupBackupBtn: { backgroundColor: '#4285F4', borderRadius: 12, padding: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  setupBackupText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+
   // Inputs
   inputGroup: { marginBottom: 16 },
   inputLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 8 },
@@ -387,6 +476,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   currencyTextActive: { color: COLORS.white },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 },
   saveBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
+
   // Bikes
   bikeItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 12 },
   bikeIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -406,6 +496,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   cancelBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
   confirmBtn: { flex: 1, padding: 12, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: 'center' },
   confirmBtnText: { fontSize: 13, fontWeight: '600', color: COLORS.white },
+
   // Reminders
   reminderItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   reminderStatusIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
@@ -423,10 +514,12 @@ const makeStyles = (COLORS) => StyleSheet.create({
   presetBtnSub: { fontSize: 11, color: COLORS.textMuted },
   addReminderForm: { paddingTop: 14, borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 8 },
   emptyText: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', paddingVertical: 8 },
+
   // Export
   exportDesc: { fontSize: 13, color: COLORS.textMuted, marginBottom: 14 },
   exportBtn: { backgroundColor: COLORS.accentBlue, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   exportBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
+
   // Info
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   infoLabel: { fontSize: 13, color: COLORS.textMuted },

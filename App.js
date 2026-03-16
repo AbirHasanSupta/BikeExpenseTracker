@@ -13,8 +13,10 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import AnalyticsScreen from './src/screens/AnalyticsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import TripScreen from './src/screens/TripScreen';
+import BackupScreen from './src/screens/BackupScreen';
 
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import { BackupProvider } from './src/context/BackupContext';
 import { requestNotificationPermission } from './src/utils/notifications';
 
 const Tab = createBottomTabNavigator();
@@ -27,6 +29,7 @@ function DashboardStack() {
       <Stack.Screen name="AddFuel" component={AddFuelScreen} />
       <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="Backup" component={BackupScreen} />
     </Stack.Navigator>
   );
 }
@@ -111,9 +114,11 @@ function AppTabs() {
 export default function App() {
   return (
     <ThemeProvider>
-      <NavigationContainer>
-        <AppTabs />
-      </NavigationContainer>
+      <BackupProvider>
+        <NavigationContainer>
+          <AppTabs />
+        </NavigationContainer>
+      </BackupProvider>
     </ThemeProvider>
   );
 }
