@@ -7,7 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   getMonthlyStats, getSettings, getLastFuelLog, getBikes,
-  setDefaultBike, getDefaultBikeId, getLastOdometer, getServiceReminders
+  setDefaultBike, getLastOdometer, getServiceReminders
 } from '../database/db';
 import { MONTHS, formatCurrency, formatDate } from '../constants';
 import { useTheme } from '../context/ThemeContext';

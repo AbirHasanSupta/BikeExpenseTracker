@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, FlatList, Alert, Modal, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, FlatList, Alert, Modal } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addTrip, endTrip, getTrips, getActiveTrip, deleteTrip, getDefaultBikeId, getLastOdometer } from '../database/db';

@@ -83,7 +83,7 @@ export default function AddFuelScreen({ navigation }) {
         { text: 'Add Another', onPress: () => { setAmount(''); setOdometer(''); setStationName(''); setNotes(''); setRemainingFuel(''); setSaving(false); } },
         { text: 'Done', onPress: () => navigation.goBack() },
       ]);
-    } catch (e) {
+    } catch (_) {
       Alert.alert('Error', 'Failed to save. Please try again.');
       setSaving(false);
     }

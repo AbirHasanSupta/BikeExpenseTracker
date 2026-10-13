@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, Share, Switch } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import {
   getSettings, updateSettings, getBikes, addBike, deleteBike, setDefaultBike,
   getServiceReminders, addServiceReminder, updateReminderServiceKm, deleteServiceReminder,
-  getLastOdometer, getAllDataForExport,
+  getLastOdometer, getAllDataForExport, importCsvRows,
 } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
 import { useBackup } from '../context/BackupContext';          // ← NEW
 import { checkAndNotifyReminders } from '../utils/notifications';
-import { formatDate } from '../constants';
+import { buildCsvString, parseCsvString } from '../utils/csv';
 
 const DEFAULT_REMINDERS = [
   { title: 'Engine Oil Change', intervalKm: 3000 },
@@ -28,7 +31,6 @@ export default function SettingsScreen({ navigation }) {
   const [fuelPrice, setFuelPrice] = useState('108');
   const [currency, setCurrency] = useState('BDT');
   const [bikes, setBikes] = useState([]);
-  const [defaultBikeId, setDefaultBikeIdState] = useState(1);
   const [newBikeName, setNewBikeName] = useState('');
   const [tankCapacity, setTankCapacity] = useState('12');
   const [showAddBike, setShowAddBike] = useState(false);
@@ -39,6 +41,7 @@ export default function SettingsScreen({ navigation }) {
   const [reminderLastKm, setReminderLastKm] = useState('');
   const [currentOdometer, setCurrentOdometer] = useState(0);
   const [activeBikeId, setActiveBikeId] = useState(1);
+  const [csvBusy, setCsvBusy] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -47,7 +50,6 @@ export default function SettingsScreen({ navigation }) {
     const bikeId = st.default_bike_id || 1;
     setFuelPrice(String(st.fuel_price));
     setCurrency(st.currency);
-    setDefaultBikeIdState(bikeId);
     setActiveBikeId(bikeId);
     setBikes(getBikes());
     const rems = getServiceReminders(bikeId);
@@ -62,7 +64,7 @@ export default function SettingsScreen({ navigation }) {
     try {
       updateSettings(parseFloat(fuelPrice), currency, activeBikeId, theme);
       Alert.alert('Saved', 'Settings updated successfully.');
-    } catch (e) { Alert.alert('Error', 'Failed to save settings.'); }
+    } catch (_) { Alert.alert('Error', 'Failed to save settings.'); }
   };
 
   const handleSetDefaultBike = (id) => {
@@ -137,17 +139,64 @@ export default function SettingsScreen({ navigation }) {
     try {
       const { fuelLogs, expenses } = getAllDataForExport(activeBikeId);
       const activeBike = bikes.find(b => b.id === activeBikeId);
-      let csv = `MotoLog Export\nBike: ${activeBike?.bike_name || 'Unknown'}\n\n`;
-      csv += 'FUEL LOGS\nDate,Litres,Price/L,Total Cost,Odometer,Station,Notes,Tag\n';
-      for (const log of fuelLogs) {
-        csv += `${log.date},${log.litres},${log.price_per_litre},${log.total_cost},${log.odometer},"${log.station_name || ''}","${log.notes || ''}",${log.ride_tag || 'personal'}\n`;
+      const csv = buildCsvString({
+        bikeId: activeBikeId,
+        bikeName: activeBike?.bike_name,
+        fuelLogs,
+        expenses,
+      });
+      const directory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!directory) throw new Error('No writable directory is available');
+
+      setCsvBusy(true);
+      const fileUri = `${directory}motolog-${new Date().toISOString().slice(0, 10)}.csv`;
+      await FileSystem.writeAsStringAsync(fileUri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Export MotoLog data',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        Alert.alert('Export Ready', `Saved CSV to ${fileUri}`);
       }
-      csv += '\nEXPENSES\nDate,Category,Cost,Notes,Tag\n';
-      for (const exp of expenses) {
-        csv += `${exp.date},${exp.category},${exp.cost},"${exp.notes || ''}",${exp.ride_tag || 'personal'}\n`;
+    } catch (e) {
+      Alert.alert('Export Failed', e?.message || 'Could not export data.');
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
+  const handleImportCSV = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'application/csv', 'application/vnd.ms-excel'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset?.uri) throw new Error('The selected file could not be opened');
+
+      setCsvBusy(true);
+      const parsed = parseCsvString(await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      }));
+      const counts = importCsvRows(activeBikeId, parsed);
+      if (counts.fuelCount + counts.expenseCount === 0) {
+        throw new Error('No valid rows were found for import');
       }
-      await Share.share({ message: csv, title: 'Bike Expense Data' });
-    } catch (e) { Alert.alert('Export Failed', 'Could not export data.'); }
+      loadData();
+      Alert.alert(
+        'Import Complete',
+        `Added ${counts.fuelCount} fuel log(s) and ${counts.expenseCount} expense(s) to ${bikes.find((bike) => bike.id === activeBikeId)?.bike_name || 'the active bike'}.`
+      );
+    } catch (e) {
+      Alert.alert('Import Failed', e?.message || 'Choose a valid MotoLog CSV file.');
+    } finally {
+      setCsvBusy(false);
+    }
   };
 
   const getReminderStatus = (reminder) => {
@@ -400,15 +449,21 @@ export default function SettingsScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Export */}
+      {/* CSV import and export */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Export Data</Text>
+        <Text style={styles.sectionTitle}>Import & Export Data</Text>
         <View style={styles.card}>
-          <Text style={styles.exportDesc}>Export all fuel logs and expenses as CSV for the active bike.</Text>
-          <TouchableOpacity style={styles.exportBtn} onPress={handleExportCSV}>
-            <MaterialCommunityIcons name="export-variant" size={18} color={COLORS.white} />
-            <Text style={styles.exportBtnText}>Export as CSV</Text>
-          </TouchableOpacity>
+          <Text style={styles.exportDesc}>CSV files include fuel logs and expenses for the active bike. Imports add rows without replacing existing data.</Text>
+          <View style={styles.csvActions}>
+            <TouchableOpacity style={[styles.importBtn, csvBusy && styles.csvBtnDisabled]} onPress={handleImportCSV} disabled={csvBusy}>
+              <MaterialCommunityIcons name="import" size={18} color={COLORS.accentBlue} />
+              <Text style={styles.importBtnText}>{csvBusy ? 'Working…' : 'Import CSV'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.exportBtn, csvBusy && styles.csvBtnDisabled]} onPress={handleExportCSV} disabled={csvBusy}>
+              <MaterialCommunityIcons name="export-variant" size={18} color={COLORS.white} />
+              <Text style={styles.exportBtnText}>Export CSV</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -517,7 +572,11 @@ const makeStyles = (COLORS) => StyleSheet.create({
 
   // Export
   exportDesc: { fontSize: 13, color: COLORS.textMuted, marginBottom: 14 },
-  exportBtn: { backgroundColor: COLORS.accentBlue, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  csvActions: { flexDirection: 'row', gap: 10 },
+  exportBtn: { flex: 1, backgroundColor: COLORS.accentBlue, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  importBtn: { flex: 1, backgroundColor: COLORS.accentBlue + '18', borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: COLORS.accentBlue + '55' },
+  importBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.accentBlue },
+  csvBtnDisabled: { opacity: 0.6 },
   exportBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
 
   // Info

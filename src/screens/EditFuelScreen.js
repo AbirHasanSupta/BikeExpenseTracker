@@ -4,7 +4,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getFuelLogById, updateFuelLog, getSettings } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
-import { RIDE_TAGS, formatCurrency } from '../constants';
+import { RIDE_TAGS } from '../constants';
 
 export default function EditFuelScreen({ navigation, route }) {
   const { COLORS } = useTheme();
@@ -20,6 +20,7 @@ export default function EditFuelScreen({ navigation, route }) {
   const [stationName, setStationName] = useState('');
   const [notes, setNotes] = useState('');
   const [rideTag, setRideTag] = useState('personal');
+  const [remainingFuel, setRemainingFuel] = useState('');
   const [pricePerLitre, setPricePerLitre] = useState('');
   const [currency, setCurrency] = useState('BDT');
   const [saving, setSaving] = useState(false);
@@ -35,12 +36,16 @@ export default function EditFuelScreen({ navigation, route }) {
     setStationName(log.station_name || '');
     setNotes(log.notes || '');
     setRideTag(log.ride_tag || 'personal');
+    setRemainingFuel(String(log.remaining_fuel || 0));
     setPricePerLitre(String(log.price_per_litre));
     setCurrency(getSettings().currency);
-  }, [id]);
+  }, [id, navigation]);
 
   const handleSave = () => {
     if (!litres || !totalCost || !odometer) { Alert.alert('Missing Fields', 'Litres, cost and odometer are required.'); return; }
+    if (parseFloat(litres) <= 0 || parseFloat(totalCost) <= 0 || parseFloat(odometer) < 0) {
+      Alert.alert('Invalid Entry', 'Please enter valid positive amounts and an odometer reading.'); return;
+    }
     try {
       setSaving(true);
       updateFuelLog({
@@ -53,9 +58,10 @@ export default function EditFuelScreen({ navigation, route }) {
         stationName,
         notes,
         rideTag,
+        remainingFuel: parseFloat(remainingFuel) || 0,
       });
       Alert.alert('Updated!', 'Fuel entry updated.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-    } catch (e) {
+    } catch (_) {
       Alert.alert('Error', 'Failed to update.');
       setSaving(false);
     }
@@ -121,6 +127,7 @@ export default function EditFuelScreen({ navigation, route }) {
         <Field label={`Total Cost (${currency})`} value={totalCost} onChangeText={setTotalCost} keyboardType="decimal-pad" placeholder="e.g. 500" icon="currency-bdt" />
         <Field label="Price per Litre" value={pricePerLitre} onChangeText={setPricePerLitre} keyboardType="decimal-pad" placeholder="e.g. 108" icon="tag" />
         <Field label="Odometer (km)" value={odometer} onChangeText={setOdometer} keyboardType="decimal-pad" placeholder="e.g. 15240" icon="counter" />
+        <Field label="Remaining Fuel Before Fill (L)" value={remainingFuel} onChangeText={setRemainingFuel} keyboardType="decimal-pad" placeholder="0" icon="gauge" />
         <Field label="Fuel Station" value={stationName} onChangeText={setStationName} placeholder="e.g. Padma Filling Station" icon="map-marker" />
         <Field label="Notes" value={notes} onChangeText={setNotes} placeholder="Any notes..." icon="note-text" />
 

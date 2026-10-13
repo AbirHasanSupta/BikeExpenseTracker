@@ -2,23 +2,29 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { COLORS } from '../constants';
+import { useTheme } from '../context/ThemeContext';
 
 export default function GlobalFAB() {
   const navigation = useNavigation();
+  const { COLORS } = useTheme();
+  const styles = makeStyles(COLORS);
   const [open, setOpen] = useState(false);
 
   const navigateTo = (screen) => {
     setOpen(false);
-    navigation.navigate(screen);
+    // Defer navigation until modal has closed to avoid stack/modal race crashes
+    requestAnimationFrame(() => {
+      try {
+        navigation.navigate(screen);
+      } catch (_) {}
+    });
   };
 
   return (
     <>
-      {/* Full-screen modal backdrop + buttons when open */}
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <View style={styles.menuContainer}>
+          <View style={styles.menuContainer} pointerEvents="box-none">
             <TouchableOpacity style={styles.menuItem} onPress={() => navigateTo('AddFuel')}>
               <Text style={styles.menuLabel}>Add Fuel</Text>
               <View style={[styles.menuBtn, { backgroundColor: COLORS.primary }]}>
@@ -32,14 +38,10 @@ export default function GlobalFAB() {
                 <MaterialCommunityIcons name="wrench" size={22} color={COLORS.white} />
               </View>
             </TouchableOpacity>
-
-            {/* Close button in same position as FAB */}
-            
           </View>
         </Pressable>
       </Modal>
 
-      {/* FAB button always visible */}
       {!open && (
         <TouchableOpacity style={styles.fab} onPress={() => setOpen(true)} activeOpacity={0.85}>
           <MaterialCommunityIcons name="plus" size={28} color={COLORS.white} />
@@ -49,7 +51,7 @@ export default function GlobalFAB() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -74,6 +76,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
+    overflow: 'hidden',
   },
   menuBtn: {
     width: 48,
@@ -98,5 +101,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
     shadowRadius: 8,
+    zIndex: 100,
   },
 });

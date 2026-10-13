@@ -31,7 +31,7 @@ export default function EditExpenseScreen({ navigation, route }) {
     setNotes(exp.notes || '');
     setRideTag(exp.ride_tag || 'personal');
     setCurrency(getSettings().currency);
-  }, [id]);
+  }, [id, navigation]);
 
   const selectedCat = EXPENSE_CATEGORIES.find(c => c.value === category);
 
@@ -42,7 +42,7 @@ export default function EditExpenseScreen({ navigation, route }) {
       setSaving(true);
       updateExpense({ id, date, category, cost: parseFloat(cost), notes, rideTag });
       Alert.alert('Updated!', 'Expense updated.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-    } catch (e) {
+    } catch (_) {
       Alert.alert('Error', 'Failed to update.');
       setSaving(false);
     }

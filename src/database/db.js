@@ -10,6 +10,9 @@ const getDb = () => {
   return _db;
 };
 
+/** Exposed for cloud restore / bulk operations */
+export const getDbHandle = () => getDb();
+
 const initSchema = (db) => {
   db.execSync(`PRAGMA journal_mode = WAL;`);
   db.execSync(`
@@ -405,11 +408,63 @@ export const getTagStats = (bikeId = 1, year, month) => {
   return Object.values(tags).map(t => ({ ...t, totalCost: t.fuelCost + t.expCost }));
 };
 
-// ─── Export CSV ───────────────────────────────────────────────────────────────
+// ─── Export / Import CSV ──────────────────────────────────────────────────────
 
 export const getAllDataForExport = (bikeId = 1) => {
   const db = getDb();
   const fuelLogs = db.getAllSync('SELECT * FROM fuel_logs WHERE bike_id = ? ORDER BY date DESC', [bikeId]);
   const expenses = db.getAllSync('SELECT * FROM expenses WHERE bike_id = ? ORDER BY date DESC', [bikeId]);
   return { fuelLogs, expenses };
+};
+
+/**
+ * Import fuel/expense rows for a bike. Does not wipe existing data.
+ */
+export const importCsvRows = (bikeId, { fuelLogs = [], expenses = [] }) => {
+  const db = getDb();
+  if (!db.getFirstSync('SELECT id FROM bikes WHERE id = ?', [bikeId])) {
+    throw new Error('The selected bike no longer exists');
+  }
+  let fuelCount = 0;
+  let expenseCount = 0;
+
+  db.execSync('BEGIN');
+  try {
+    for (const f of fuelLogs) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || '') || !(f.litres > 0) || !(f.odometer >= 0)) continue;
+      const totalCost = f.total_cost || ((f.litres || 0) * (f.price_per_litre || 0));
+      const price = f.price_per_litre || (f.litres > 0 ? totalCost / f.litres : 0);
+      db.runSync(
+        `INSERT INTO fuel_logs (bike_id, date, litres, price_per_litre, total_cost, odometer, station_name, notes, ride_tag, remaining_fuel)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          bikeId,
+          f.date,
+          f.litres,
+          price,
+          totalCost,
+          f.odometer,
+          f.station_name || '',
+          f.notes || '',
+          f.ride_tag || 'personal',
+          f.remaining_fuel || 0,
+        ]
+      );
+      fuelCount++;
+    }
+    for (const e of expenses) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date || '') || !(e.cost > 0)) continue;
+      db.runSync(
+        `INSERT INTO expenses (bike_id, date, category, cost, notes, ride_tag) VALUES (?, ?, ?, ?, ?, ?)`,
+        [bikeId, e.date, e.category || 'others', e.cost, e.notes || '', e.ride_tag || 'personal']
+      );
+      expenseCount++;
+    }
+    db.execSync('COMMIT');
+  } catch (err) {
+    db.execSync('ROLLBACK');
+    throw err;
+  }
+
+  return { fuelCount, expenseCount };
 };

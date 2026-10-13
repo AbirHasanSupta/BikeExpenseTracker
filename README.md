@@ -5,14 +5,16 @@ Built for Android. Works 100% offline with local SQLite storage.
 
 ---
 
-## 📱 Features (Draft v1.0)
+## 📱 Features
 
 - ✅ **Dashboard** — Monthly expense overview with stats
 - ✅ **Add Fuel** — Two entry methods (amount or litres), live calculations
 - ✅ **Add Expense** — 12 categories with icons
 - ✅ **History** — View/delete all fuel logs and expenses
-- ✅ **Analytics** — Line, bar, and pie charts (last 6 months)
-- ✅ **Settings** — Set fuel price, currency, manage bikes
+- ✅ **Analytics** — New-Architecture-safe monthly and category breakdowns
+- ✅ **Settings** — Set fuel price, currency, manage bikes, service reminders
+- ✅ **CSV import/export** — Round-trip-safe files, including the previous MotoLog export format
+- ✅ **Google Drive backup** — Private app-data backup and transactional restore
 - ✅ **SQLite Database** — Fully offline, data persists on device
 - ✅ **Key calculations** — Mileage (km/L), Cost/km, Distance traveled
 
@@ -51,6 +53,25 @@ eas build:configure
 
 # Build APK for Android
 eas build -p android --profile preview
+```
+
+### Configure Google Drive backup
+
+Cloud backup requires your own Google OAuth client IDs. In Google Cloud Console, enable the Google Drive API and create an Android OAuth client for package `com.abirsupta.MotoLog` using the SHA-1 certificate fingerprint for the EAS build. Create a Web client too if you use the web build. Then add the IDs to a local `.env` file (never commit it) and to the corresponding EAS environment secrets:
+
+```bash
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=...apps.googleusercontent.com
+```
+
+Rebuild after changing an `EXPO_PUBLIC_` value. The app remains usable without these values; it shows a configuration message instead of crashing when Backup is opened.
+
+### Verify before an EAS build
+
+```bash
+npm run verify
+npx expo export --platform android
 ```
 
 ---
@@ -128,19 +149,6 @@ Cost per KM    = (Fuel Cost + Maintenance) / Distance
 
 ---
 
-## 🗺️ Roadmap (Coming Features)
-
-- [ ] Multi-bike switching from dashboard
-- [ ] Service reminders (km-based notifications)
-- [ ] Tank range estimator
-- [ ] CSV/PDF export
-- [ ] Fuel station tracking with mileage comparison
-- [ ] Ride tagging (office, personal, travel)
-- [ ] Home screen widgets
-- [ ] Cloud backup
-
----
-
 ## 📦 Dependencies
 
 | Package | Purpose |
@@ -150,8 +158,9 @@ Cost per KM    = (Fuel Cost + Maintenance) / Distance
 | @react-navigation/bottom-tabs | Tab bar navigation |
 | @react-navigation/stack | Stack screens |
 | @expo/vector-icons | MaterialCommunityIcons |
-| react-native-chart-kit | Line, Bar, Pie charts |
-| react-native-svg | Required by chart-kit |
+| expo-auth-session | Google OAuth sign-in |
+| expo-document-picker / expo-sharing | CSV import and file export |
+| expo-notifications | Service-reminder notifications |
 | react-native-screens | Native screen optimization |
 | react-native-safe-area-context | Safe area handling |
 

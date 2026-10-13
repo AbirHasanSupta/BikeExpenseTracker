@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  ActivityIndicator, Image, Alert,
+  ActivityIndicator, Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -48,7 +48,7 @@ export default function BackupScreen({ navigation }) {
       setChecking(true);
       checkBackupExists().finally(() => setChecking(false));
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, checkBackupExists]);
 
   const busy = isBacking || isRestoring || isLoading || checking;
 

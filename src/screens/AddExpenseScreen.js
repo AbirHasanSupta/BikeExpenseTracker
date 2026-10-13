@@ -37,7 +37,7 @@ export default function AddExpenseScreen({ navigation }) {
         { text: 'Add Another', onPress: () => { setCategory(null); setCost(''); setNotes(''); setSaving(false); } },
         { text: 'Done', onPress: () => navigation.goBack() },
       ]);
-    } catch (e) {
+    } catch (_) {
       Alert.alert('Error', 'Failed to save. Please try again.');
       setSaving(false);
     }

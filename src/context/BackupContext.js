@@ -2,22 +2,20 @@
  * BackupContext.js
  * Manages Google OAuth state and exposes backup/restore actions app-wide.
  *
- * Setup required in app.json (already has expo-auth-session via expo):
- *   "scheme": "motolog"   ← add this to the expo object in app.json
- *
- * Google Cloud Console:
- *   1. Create OAuth 2.0 Client ID → Android + iOS
- *   2. Redirect URI: https://auth.expo.io/@abirsupta/MotoLog
- *   3. Enable Google Drive API
- *   4. Paste your client IDs below.
+ * Google Cloud Console setup:
+ *   1. Create OAuth 2.0 Client IDs (Android + Web; iOS optional)
+ *   2. Enable Google Drive API
+ *   3. Android package: com.abirsupta.MotoLog (SHA-1 from EAS credentials)
+ *   4. Set EXPO_PUBLIC_GOOGLE_*_CLIENT_ID in .env / EAS secrets
  */
 
 import React, {
-  createContext, useContext, useState, useEffect, useCallback,
+  createContext, useContext, useState, useEffect, useCallback, useRef,
 } from 'react';
 import { Alert, Platform } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
@@ -25,16 +23,23 @@ import {
   buildBackupPayload, restoreFromPayload,
 } from '../utils/cloudBackup';
 import * as db from '../database/db';
+import { getDbHandle } from '../database/db';
 
-// ─── !! REPLACE THESE WITH YOUR OWN GOOGLE OAUTH CLIENT IDs !! ───────────────
-// Get them from: https://console.cloud.google.com/apis/credentials
-// Create an OAuth 2.0 Client ID for each platform.
 const GOOGLE_CLIENT_IDS = {
-  androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '',
+  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
 };
-// ─────────────────────────────────────────────────────────────────────────────
+
+// `useAuthRequest` requires a client ID while it initializes. Supplying a
+// placeholder keeps an unconfigured production build from crashing during
+// startup; signIn below prevents that placeholder from ever being used.
+const PLACEHOLDER_CLIENT_ID = '000000000000-placeholder.apps.googleusercontent.com';
+const configuredClientId = Platform.select({
+  android: GOOGLE_CLIENT_IDS.androidClientId,
+  ios: GOOGLE_CLIENT_IDS.iosClientId,
+  default: GOOGLE_CLIENT_IDS.webClientId,
+}) || '';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -52,6 +57,7 @@ const BackupContext = createContext({
   isRestoring: false,
   lastBackupTime: null,
   backupMeta: null,
+  isConfigured: false,
   signIn: async () => {},
   signOut: async () => {},
   backupNow: async () => {},
@@ -67,21 +73,30 @@ export const BackupProvider = ({ children }) => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [lastBackupTime, setLastBackupTime] = useState(null);
   const [backupMeta, setBackupMeta] = useState(null);
+  const handlingAuth = useRef(false);
 
-  // expo-auth-session Google provider
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: GOOGLE_CLIENT_IDS.androidClientId,
-    iosClientId: GOOGLE_CLIENT_IDS.iosClientId,
-    webClientId: GOOGLE_CLIENT_IDS.webClientId,
+  const redirectUri = makeRedirectUri({
+    scheme: 'motolog',
+    path: 'oauth',
+  });
+
+  const authConfig = {
+    androidClientId: GOOGLE_CLIENT_IDS.androidClientId || PLACEHOLDER_CLIENT_ID,
+    iosClientId: GOOGLE_CLIENT_IDS.iosClientId || PLACEHOLDER_CLIENT_ID,
+    webClientId: GOOGLE_CLIENT_IDS.webClientId || PLACEHOLDER_CLIENT_ID,
     scopes: [
       'openid',
       'profile',
       'email',
       'https://www.googleapis.com/auth/drive.appdata',
     ],
-  });
+    redirectUri,
+    selectAccount: true,
+  };
 
-  // ── Restore session on mount ───────────────────────────────────────────────
+  // Hook must always run; signIn guards when IDs are missing.
+  const [request, response, promptAsync] = Google.useAuthRequest(authConfig);
+
   useEffect(() => {
     (async () => {
       try {
@@ -98,110 +113,17 @@ export const BackupProvider = ({ children }) => {
     })();
   }, []);
 
-  // ── Handle OAuth response ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const token = response.authentication?.accessToken;
-      if (token) handleSuccessfulAuth(token);
-    }
-  }, [response]);
-
-  const handleSuccessfulAuth = async (token) => {
-    try {
-      setIsLoading(true);
-      setAccessToken(token);
-      await AsyncStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, token);
-
-      // Fetch user profile
-      const profileRes = await fetch(
-        'https://www.googleapis.com/oauth2/v3/userinfo',
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const profile = await profileRes.json();
-      const userInfo = {
-        id: profile.sub,
-        name: profile.name,
-        email: profile.email,
-        picture: profile.picture,
-      };
-      setUser(userInfo);
-      await AsyncStorage.setItem(STORAGE_KEYS.USER_INFO, JSON.stringify(userInfo));
-
-      // Check if there's existing backup data on Drive
-      const existing = await findBackupFile(token);
-      if (existing) {
-        setBackupMeta(existing);
-        // Prompt user: restore or keep local?
-        Alert.alert(
-          '☁️ Backup Found',
-          `We found a backup from ${new Date(existing.modifiedTime).toLocaleDateString()} on your Google Drive.\n\nWould you like to restore it?`,
-          [
-            {
-              text: 'Restore Backup',
-              onPress: () => performRestore(token),
-            },
-            {
-              text: 'Keep Local Data',
-              style: 'cancel',
-              onPress: () => {
-                // Immediately back up local data to Drive
-                performBackup(token);
-              },
-            },
-          ]
-        );
-      } else {
-        // No existing backup — upload local data immediately
-        await performBackup(token);
-        Alert.alert('✅ Signed In', `Welcome, ${userInfo.name}!\nYour data has been backed up to Google Drive.`);
-      }
-    } catch (e) {
-      console.error('Auth error:', e);
-      Alert.alert('Sign-in Error', 'Could not complete Google sign-in. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // ── Sign In ────────────────────────────────────────────────────────────────
-  const signIn = useCallback(async () => {
-    if (!request) {
-      Alert.alert(
-        'Configuration Needed',
-        'Google OAuth is not configured yet.\n\nAdd your Google Client IDs to src/context/BackupContext.js to enable cloud backup.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    await promptAsync();
-  }, [request, promptAsync]);
-
-  // ── Sign Out ───────────────────────────────────────────────────────────────
-  const signOut = useCallback(async () => {
-    Alert.alert(
-      'Sign Out',
-      'Sign out of Google? Your local data will remain on this device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            await Promise.all([
-              AsyncStorage.removeItem(STORAGE_KEYS.USER_INFO),
-              AsyncStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN),
-            ]);
-            setUser(null);
-            setAccessToken(null);
-            setBackupMeta(null);
-          },
-        },
-      ]
-    );
+  const clearSession = useCallback(async () => {
+    await Promise.all([
+      AsyncStorage.removeItem(STORAGE_KEYS.USER_INFO),
+      AsyncStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN),
+    ]);
+    setUser(null);
+    setAccessToken(null);
+    setBackupMeta(null);
   }, []);
 
-  // ── Backup ─────────────────────────────────────────────────────────────────
-  const performBackup = async (token) => {
+  const performBackup = useCallback(async (token) => {
     const t = token || accessToken;
     if (!t) return false;
     try {
@@ -211,33 +133,21 @@ export const BackupProvider = ({ children }) => {
       const now = new Date().toISOString();
       setLastBackupTime(now);
       await AsyncStorage.setItem(STORAGE_KEYS.LAST_BACKUP, now);
-      // Refresh meta
       const meta = await findBackupFile(t);
       if (meta) setBackupMeta(meta);
       return true;
     } catch (e) {
       console.error('Backup error:', e);
+      if (String(e?.message || '').includes('expired')) {
+        await clearSession();
+      }
       return false;
     } finally {
       setIsBacking(false);
     }
-  };
+  }, [accessToken, clearSession]);
 
-  const backupNow = useCallback(async () => {
-    if (!accessToken) {
-      Alert.alert('Not Signed In', 'Please sign in to Google to back up your data.');
-      return;
-    }
-    const ok = await performBackup(accessToken);
-    if (ok) {
-      Alert.alert('✅ Backup Complete', 'Your data has been saved to Google Drive.');
-    } else {
-      Alert.alert('Backup Failed', 'Could not back up to Google Drive. Check your connection and try again.');
-    }
-  }, [accessToken]);
-
-  // ── Restore ────────────────────────────────────────────────────────────────
-  const performRestore = async (token) => {
+  const performRestore = useCallback(async (token) => {
     const t = token || accessToken;
     if (!t) return false;
     try {
@@ -247,9 +157,7 @@ export const BackupProvider = ({ children }) => {
         Alert.alert('No Backup', 'No backup file found on Google Drive.');
         return false;
       }
-      // Get raw db handle via a known sync call
-      const SQLite = require('expo-sqlite');
-      const dbHandle = SQLite.openDatabaseSync('bike_expense.db');
+      const dbHandle = getDbHandle();
       const stats = restoreFromPayload(dbHandle, payload);
       const now = new Date().toISOString();
       setLastBackupTime(now);
@@ -257,11 +165,128 @@ export const BackupProvider = ({ children }) => {
       return stats;
     } catch (e) {
       console.error('Restore error:', e);
+      if (String(e?.message || '').includes('expired')) {
+        await clearSession();
+      }
       return false;
     } finally {
       setIsRestoring(false);
     }
-  };
+  }, [accessToken, clearSession]);
+
+  const handleSuccessfulAuth = useCallback(async (token) => {
+    if (!token || handlingAuth.current) return;
+    handlingAuth.current = true;
+    try {
+      setIsLoading(true);
+      setAccessToken(token);
+      await AsyncStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, token);
+
+      const profileRes = await fetch(
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!profileRes.ok) throw new Error(`Profile fetch failed: ${profileRes.status}`);
+      const profile = await profileRes.json();
+      const userInfo = {
+        id: profile.sub,
+        name: profile.name || profile.email || 'Google User',
+        email: profile.email || '',
+        picture: profile.picture || null,
+      };
+      setUser(userInfo);
+      await AsyncStorage.setItem(STORAGE_KEYS.USER_INFO, JSON.stringify(userInfo));
+
+      const existing = await findBackupFile(token);
+      if (existing) {
+        setBackupMeta(existing);
+        Alert.alert(
+          'Backup Found',
+          `We found a backup from ${new Date(existing.modifiedTime).toLocaleDateString()} on your Google Drive.\n\nWould you like to restore it?`,
+          [
+            { text: 'Restore Backup', onPress: () => performRestore(token) },
+            {
+              text: 'Keep Local Data',
+              style: 'cancel',
+              onPress: () => { performBackup(token); },
+            },
+          ]
+        );
+      } else {
+        const backedUp = await performBackup(token);
+        Alert.alert(
+          backedUp ? 'Signed In' : 'Signed In, Backup Pending',
+          backedUp
+            ? `Welcome, ${userInfo.name}!\nYour data has been backed up to Google Drive.`
+            : `Welcome, ${userInfo.name}! Google sign-in worked, but the first backup did not complete. Use Back Up Now to retry.`
+        );
+      }
+    } catch (e) {
+      console.error('Auth error:', e);
+      Alert.alert('Sign-in Error', e?.message || 'Could not complete Google sign-in. Please try again.');
+      await clearSession();
+    } finally {
+      setIsLoading(false);
+      handlingAuth.current = false;
+    }
+  }, [performBackup, performRestore, clearSession]);
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const token = response.authentication?.accessToken;
+      if (token) handleSuccessfulAuth(token);
+    } else if (response?.type === 'error') {
+      Alert.alert('Sign-in Error', response.error?.message || 'Google sign-in failed.');
+    }
+  }, [response, handleSuccessfulAuth]);
+
+  const signIn = useCallback(async () => {
+    if (!configuredClientId) {
+      Alert.alert(
+        'Configuration Needed',
+        `Google OAuth is not configured for ${Platform.OS}.\n\nSet the matching EXPO_PUBLIC_GOOGLE_*_CLIENT_ID (see .env.example), then rebuild the app.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    if (!request) {
+      Alert.alert('Please wait', 'Google sign-in is still initializing. Try again in a moment.');
+      return;
+    }
+    try {
+      await promptAsync({ showInRecents: true });
+    } catch (e) {
+      Alert.alert('Sign-in Error', e?.message || 'Could not open Google sign-in.');
+    }
+  }, [request, promptAsync]);
+
+  const signOut = useCallback(async () => {
+    Alert.alert(
+      'Sign Out',
+      'Sign out of Google? Your local data will remain on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: () => { clearSession(); },
+        },
+      ]
+    );
+  }, [clearSession]);
+
+  const backupNow = useCallback(async () => {
+    if (!accessToken) {
+      Alert.alert('Not Signed In', 'Please sign in to Google to back up your data.');
+      return;
+    }
+    const ok = await performBackup(accessToken);
+    if (ok) {
+      Alert.alert('Backup Complete', 'Your data has been saved to Google Drive.');
+    } else {
+      Alert.alert('Backup Failed', 'Could not back up to Google Drive. Check your connection and try again.');
+    }
+  }, [accessToken, performBackup]);
 
   const restoreNow = useCallback(async () => {
     if (!accessToken) {
@@ -269,7 +294,7 @@ export const BackupProvider = ({ children }) => {
       return;
     }
     Alert.alert(
-      '⚠️ Restore Backup',
+      'Restore Backup',
       'This will REPLACE all current data on this device with your backed-up data. This cannot be undone.\n\nContinue?',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -280,7 +305,7 @@ export const BackupProvider = ({ children }) => {
             const stats = await performRestore(accessToken);
             if (stats) {
               Alert.alert(
-                '✅ Restore Complete',
+                'Restore Complete',
                 `Restored:\n• ${stats.bikes} bike(s)\n• ${stats.fuelLogs} fuel logs\n• ${stats.expenses} expenses\n• ${stats.reminders} reminders\n• ${stats.trips} trips\n\nPlease restart the app for changes to take effect.`
               );
             } else {
@@ -290,7 +315,7 @@ export const BackupProvider = ({ children }) => {
         },
       ]
     );
-  }, [accessToken]);
+  }, [accessToken, performRestore]);
 
   const checkBackupExists = useCallback(async () => {
     if (!accessToken) return null;
@@ -298,10 +323,13 @@ export const BackupProvider = ({ children }) => {
       const meta = await findBackupFile(accessToken);
       setBackupMeta(meta);
       return meta;
-    } catch (_) {
+    } catch (e) {
+      if (String(e?.message || '').includes('expired')) {
+        await clearSession();
+      }
       return null;
     }
-  }, [accessToken]);
+  }, [accessToken, clearSession]);
 
   return (
     <BackupContext.Provider
@@ -313,6 +341,7 @@ export const BackupProvider = ({ children }) => {
         isRestoring,
         lastBackupTime,
         backupMeta,
+        isConfigured: !!configuredClientId,
         signIn,
         signOut,
         backupNow,

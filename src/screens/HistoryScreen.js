@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, RefreshControl, SectionList, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, RefreshControl, SectionList, TextInput } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getFuelLogs, getExpenses, deleteFuelLog, deleteExpense, getSettings, getDefaultBikeId } from '../database/db';
@@ -62,18 +62,23 @@ const ExpenseItem = ({ item, currency, onDelete, COLORS, styles }) => {
 const groupByMonth = (items) => {
   const map = {};
   for (const item of items) {
-    const key = item.date.slice(0, 7); // "YYYY-MM"
+    const dateStr = item?.date ? String(item.date) : '';
+    const key = dateStr.length >= 7 ? dateStr.slice(0, 7) : 'Unknown';
     if (!map[key]) map[key] = [];
     map[key].push(item);
   }
-  // Sort keys descending (most recent first)
   return Object.keys(map)
     .sort((a, b) => b.localeCompare(a))
-    .map(key => ({
-      key,
-      title: `${MONTHS[parseInt(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`,
-      data: map[key],
-    }));
+    .map(key => {
+      if (key === 'Unknown') return { key, title: 'Unknown date', data: map[key] };
+      const monthIdx = parseInt(key.slice(5, 7), 10) - 1;
+      const monthName = MONTHS[monthIdx] || key;
+      return {
+        key,
+        title: `${monthName} ${key.slice(0, 4)}`,
+        data: map[key],
+      };
+    });
 };
 
 export default function HistoryScreen({ navigation }) {
