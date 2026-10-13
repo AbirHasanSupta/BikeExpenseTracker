@@ -7,6 +7,138 @@
 const BACKUP_FILENAME = 'motolog_backup.json';
 const BACKUP_VERSION = 2;
 
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const numberOr = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+const positiveNumberOr = (value, fallback) => {
+  const number = numberOr(value, fallback);
+  return number > 0 ? number : fallback;
+};
+const positiveIntegerOrNull = (value) => {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+};
+const validDate = (value) => {
+  const text = String(value || '');
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3])
+    ? text
+    : null;
+};
+const textOrEmpty = (value) => (value === null || value === undefined ? '' : String(value));
+
+/**
+ * Normalizes data downloaded from Drive before any destructive database work.
+ * Older backups can contain strings for numeric SQLite columns; malformed child
+ * records are skipped rather than allowed to crash a later render.
+ */
+export const normalizeBackupPayload = (payload) => {
+  if (!isObject(payload) || !Array.isArray(payload.bikes) || payload.bikes.length === 0) {
+    throw new Error('Invalid backup data');
+  }
+
+  const bikes = payload.bikes.map((bike) => {
+    if (!isObject(bike)) throw new Error('Backup contains an invalid bike');
+    const id = positiveIntegerOrNull(bike.id);
+    const bikeName = textOrEmpty(bike.bike_name).trim();
+    if (!id || !bikeName) throw new Error('Backup contains an invalid bike');
+    return {
+      id,
+      bike_name: bikeName,
+      tank_capacity: positiveNumberOr(bike.tank_capacity, 12),
+      notes: textOrEmpty(bike.notes),
+      created_at: textOrEmpty(bike.created_at) || new Date().toISOString(),
+    };
+  });
+  const bikeIds = new Set(bikes.map((bike) => bike.id));
+  if (bikeIds.size !== bikes.length) throw new Error('Backup contains duplicate bike IDs');
+
+  const requestedDefaultBikeId = positiveIntegerOrNull(payload.settings?.default_bike_id);
+  const defaultBikeId = bikeIds.has(requestedDefaultBikeId) ? requestedDefaultBikeId : bikes[0].id;
+  const settings = {
+    fuel_price: positiveNumberOr(payload.settings?.fuel_price, 108),
+    currency: textOrEmpty(payload.settings?.currency).trim() || 'BDT',
+    default_bike_id: defaultBikeId,
+    theme: payload.settings?.theme === 'light' ? 'light' : 'dark',
+  };
+  const normalizeBikeId = (value) => {
+    const bikeId = positiveIntegerOrNull(value) || defaultBikeId;
+    return bikeIds.has(bikeId) ? bikeId : null;
+  };
+  const rows = (value) => Array.isArray(value) ? value : [];
+
+  const fuelLogs = rows(payload.fuelLogs).flatMap((log) => {
+    if (!isObject(log)) return [];
+    const bikeId = normalizeBikeId(log.bike_id);
+    const date = validDate(log.date);
+    const litres = positiveNumberOr(log.litres, 0);
+    const odometer = numberOr(log.odometer, -1);
+    if (!bikeId || !date || litres <= 0 || odometer < 0) return [];
+    const totalCost = numberOr(log.total_cost, 0);
+    const price = numberOr(log.price_per_litre, totalCost > 0 ? totalCost / litres : 0);
+    return [{
+      id: positiveIntegerOrNull(log.id), bike_id: bikeId, date, litres,
+      price_per_litre: Math.max(0, price), total_cost: Math.max(0, totalCost), odometer,
+      station_name: textOrEmpty(log.station_name), notes: textOrEmpty(log.notes),
+      ride_tag: textOrEmpty(log.ride_tag) || 'personal',
+      remaining_fuel: Math.max(0, numberOr(log.remaining_fuel, 0)),
+      created_at: textOrEmpty(log.created_at) || new Date().toISOString(),
+    }];
+  });
+  const expenses = rows(payload.expenses).flatMap((expense) => {
+    if (!isObject(expense)) return [];
+    const bikeId = normalizeBikeId(expense.bike_id);
+    const date = validDate(expense.date);
+    const cost = positiveNumberOr(expense.cost, 0);
+    if (!bikeId || !date || cost <= 0) return [];
+    return [{
+      id: positiveIntegerOrNull(expense.id), bike_id: bikeId, date, cost,
+      category: textOrEmpty(expense.category) || 'others', notes: textOrEmpty(expense.notes),
+      ride_tag: textOrEmpty(expense.ride_tag) || 'personal',
+      created_at: textOrEmpty(expense.created_at) || new Date().toISOString(),
+    }];
+  });
+  const reminders = rows(payload.reminders).flatMap((reminder) => {
+    if (!isObject(reminder)) return [];
+    const bikeId = normalizeBikeId(reminder.bike_id);
+    const title = textOrEmpty(reminder.title).trim();
+    const interval = positiveNumberOr(reminder.interval_km, 0);
+    if (!bikeId || !title || interval <= 0) return [];
+    return [{
+      id: positiveIntegerOrNull(reminder.id), bike_id: bikeId, title,
+      interval_km: interval, last_service_km: Math.max(0, numberOr(reminder.last_service_km, 0)),
+      notes: textOrEmpty(reminder.notes), created_at: textOrEmpty(reminder.created_at) || new Date().toISOString(),
+    }];
+  });
+  const trips = rows(payload.trips).flatMap((trip) => {
+    if (!isObject(trip)) return [];
+    const bikeId = normalizeBikeId(trip.bike_id);
+    const title = textOrEmpty(trip.title).trim();
+    const date = validDate(trip.date);
+    const startOdometer = numberOr(trip.start_odometer, -1);
+    const endOdometer = trip.end_odometer === null || trip.end_odometer === undefined || trip.end_odometer === ''
+      ? null
+      : numberOr(trip.end_odometer, -1);
+    if (!bikeId || !title || !date || startOdometer < 0 || (endOdometer !== null && endOdometer < startOdometer)) return [];
+    return [{
+      id: positiveIntegerOrNull(trip.id), bike_id: bikeId, title, date,
+      start_odometer: startOdometer, end_odometer: endOdometer,
+      notes: textOrEmpty(trip.notes), ride_tag: textOrEmpty(trip.ride_tag) || 'personal',
+      status: trip.status === 'active' ? 'active' : 'completed',
+      avg_mileage: Math.max(0, numberOr(trip.avg_mileage, 0)),
+      total_fuel_litres: Math.max(0, numberOr(trip.total_fuel_litres, 0)),
+      total_fuel_cost: Math.max(0, numberOr(trip.total_fuel_cost, 0)),
+      created_at: textOrEmpty(trip.created_at) || new Date().toISOString(),
+    }];
+  });
+
+  return { bikes, settings, fuelLogs, expenses, reminders, trips };
+};
+
 const driveHeaders = (accessToken, extra = {}) => ({
   Authorization: `Bearer ${accessToken}`,
   ...extra,
@@ -140,13 +272,9 @@ export const buildBackupPayload = (db) => {
  * Restore all data from backup payload into the local SQLite db.
  */
 export const restoreFromPayload = (dbHandle, payload) => {
-  if (!payload || !Array.isArray(payload.bikes) || payload.bikes.length === 0) {
-    throw new Error('Invalid backup data');
-  }
-
+  const backup = normalizeBackupPayload(payload);
   const db = dbHandle;
-  const bikes = payload.bikes.filter((bike) => bike && bike.id && bike.bike_name);
-  if (bikes.length !== payload.bikes.length) throw new Error('Backup contains an invalid bike');
+  const { bikes, settings, fuelLogs, expenses, reminders, trips } = backup;
 
   db.execSync('BEGIN IMMEDIATE');
   try {
@@ -163,23 +291,12 @@ export const restoreFromPayload = (dbHandle, payload) => {
       );
     }
 
-    const restoredBikeIds = new Set(bikes.map((bike) => bike.id));
-    const defaultBikeId = restoredBikeIds.has(payload.settings?.default_bike_id)
-      ? payload.settings.default_bike_id
-      : bikes[0].id;
+    db.runSync(
+      'UPDATE settings SET fuel_price=?, currency=?, default_bike_id=?, theme=?',
+      [settings.fuel_price, settings.currency, settings.default_bike_id, settings.theme]
+    );
 
-    if (payload.settings) {
-      const s = payload.settings;
-      db.runSync(
-        'UPDATE settings SET fuel_price=?, currency=?, default_bike_id=?, theme=?',
-        [s.fuel_price || 108, s.currency || 'BDT', defaultBikeId, s.theme || 'dark']
-      );
-    } else {
-      db.runSync('UPDATE settings SET default_bike_id = ?', [defaultBikeId]);
-    }
-
-    for (const f of payload.fuelLogs || []) {
-      if (!restoredBikeIds.has(f.bike_id)) continue;
+    for (const f of fuelLogs) {
       db.runSync(
         `INSERT OR REPLACE INTO fuel_logs
         (id, bike_id, date, litres, price_per_litre, total_cost, odometer,
@@ -194,8 +311,7 @@ export const restoreFromPayload = (dbHandle, payload) => {
       );
     }
 
-    for (const e of payload.expenses || []) {
-      if (!restoredBikeIds.has(e.bike_id)) continue;
+    for (const e of expenses) {
       db.runSync(
         `INSERT OR REPLACE INTO expenses
         (id, bike_id, date, category, cost, notes, ride_tag, created_at)
@@ -208,8 +324,7 @@ export const restoreFromPayload = (dbHandle, payload) => {
       );
     }
 
-    for (const r of payload.reminders || []) {
-      if (!restoredBikeIds.has(r.bike_id)) continue;
+    for (const r of reminders) {
       db.runSync(
         `INSERT OR REPLACE INTO service_reminders
         (id, bike_id, title, interval_km, last_service_km, notes, created_at)
@@ -222,8 +337,7 @@ export const restoreFromPayload = (dbHandle, payload) => {
       );
     }
 
-    for (const t of payload.trips || []) {
-      if (!restoredBikeIds.has(t.bike_id)) continue;
+    for (const t of trips) {
       db.runSync(
         `INSERT OR REPLACE INTO trips
         (id, bike_id, title, date, start_odometer, end_odometer, notes,
@@ -246,10 +360,10 @@ export const restoreFromPayload = (dbHandle, payload) => {
   }
 
   return {
-    bikes: payload.bikes.length,
-    fuelLogs: (payload.fuelLogs || []).length,
-    expenses: (payload.expenses || []).length,
-    reminders: (payload.reminders || []).length,
-    trips: (payload.trips || []).length,
+    bikes: bikes.length,
+    fuelLogs: fuelLogs.length,
+    expenses: expenses.length,
+    reminders: reminders.length,
+    trips: trips.length,
   };
 };

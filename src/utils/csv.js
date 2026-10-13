@@ -159,6 +159,20 @@ export const parseCsvString = (raw) => {
     }
     if (/^MotoLog Export/i.test(line) || /^Bike:/i.test(line)) continue;
 
+    // Some spreadsheet tools remove the MotoLog section labels but preserve
+    // the column headers. Accept those files as well.
+    if (cols[0]?.trim().toLowerCase() === 'date') {
+      const headerColumns = cols.map((column) => column.trim().toLowerCase());
+      if (headerColumns.includes('litres') && headerColumns.includes('odometer')) {
+        mode = 'legacy_fuel';
+        continue;
+      }
+      if (headerColumns.includes('category') && headerColumns.includes('cost')) {
+        mode = 'legacy_expense';
+        continue;
+      }
+    }
+
     if (mode === 'legacy_fuel_header') {
       mode = 'legacy_fuel';
       continue;

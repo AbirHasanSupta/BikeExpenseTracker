@@ -10,12 +10,11 @@
  */
 
 import React, {
-  createContext, useContext, useState, useEffect, useCallback, useRef,
+  createContext, useContext, useState, useEffect, useCallback, useMemo,
 } from 'react';
 import { Alert, Platform } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
+import * as AuthSession from 'expo-auth-session';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
@@ -31,17 +30,11 @@ const GOOGLE_CLIENT_IDS = {
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
 };
 
-// `useAuthRequest` requires a client ID while it initializes. Supplying a
-// placeholder keeps an unconfigured production build from crashing during
-// startup; signIn below prevents that placeholder from ever being used.
-const PLACEHOLDER_CLIENT_ID = '000000000000-placeholder.apps.googleusercontent.com';
 const configuredClientId = Platform.select({
   android: GOOGLE_CLIENT_IDS.androidClientId,
   ios: GOOGLE_CLIENT_IDS.iosClientId,
   default: GOOGLE_CLIENT_IDS.webClientId,
 }) || '';
-
-WebBrowser.maybeCompleteAuthSession();
 
 const STORAGE_KEYS = {
   USER_INFO: '@motolog_google_user',
@@ -73,17 +66,15 @@ export const BackupProvider = ({ children }) => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [lastBackupTime, setLastBackupTime] = useState(null);
   const [backupMeta, setBackupMeta] = useState(null);
-  const handlingAuth = useRef(false);
-
-  const redirectUri = makeRedirectUri({
+  const redirectUri = useMemo(() => AuthSession.makeRedirectUri({
     scheme: 'motolog',
     path: 'oauth',
-  });
+  }), []);
 
-  const authConfig = {
-    androidClientId: GOOGLE_CLIENT_IDS.androidClientId || PLACEHOLDER_CLIENT_ID,
-    iosClientId: GOOGLE_CLIENT_IDS.iosClientId || PLACEHOLDER_CLIENT_ID,
-    webClientId: GOOGLE_CLIENT_IDS.webClientId || PLACEHOLDER_CLIENT_ID,
+  const authConfig = useMemo(() => ({
+    clientId: configuredClientId,
+    responseType: 'code',
+    usePKCE: true,
     scopes: [
       'openid',
       'profile',
@@ -91,11 +82,8 @@ export const BackupProvider = ({ children }) => {
       'https://www.googleapis.com/auth/drive.appdata',
     ],
     redirectUri,
-    selectAccount: true,
-  };
-
-  // Hook must always run; signIn guards when IDs are missing.
-  const [request, response, promptAsync] = Google.useAuthRequest(authConfig);
+    extraParams: { prompt: 'select_account' },
+  }), [redirectUri]);
 
   useEffect(() => {
     (async () => {
@@ -175,8 +163,7 @@ export const BackupProvider = ({ children }) => {
   }, [accessToken, clearSession]);
 
   const handleSuccessfulAuth = useCallback(async (token) => {
-    if (!token || handlingAuth.current) return;
-    handlingAuth.current = true;
+    if (!token) return;
     try {
       setIsLoading(true);
       setAccessToken(token);
@@ -227,18 +214,8 @@ export const BackupProvider = ({ children }) => {
       await clearSession();
     } finally {
       setIsLoading(false);
-      handlingAuth.current = false;
     }
   }, [performBackup, performRestore, clearSession]);
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const token = response.authentication?.accessToken;
-      if (token) handleSuccessfulAuth(token);
-    } else if (response?.type === 'error') {
-      Alert.alert('Sign-in Error', response.error?.message || 'Google sign-in failed.');
-    }
-  }, [response, handleSuccessfulAuth]);
 
   const signIn = useCallback(async () => {
     if (!configuredClientId) {
@@ -249,16 +226,30 @@ export const BackupProvider = ({ children }) => {
       );
       return;
     }
-    if (!request) {
-      Alert.alert('Please wait', 'Google sign-in is still initializing. Try again in a moment.');
-      return;
-    }
     try {
-      await promptAsync({ showInRecents: true });
+      setIsLoading(true);
+      // Loading and prompting only in response to a tap avoids starting
+      // AuthSession promises when Android launches headless JS for a
+      // notification callback.
+      const request = await AuthSession.loadAsync(authConfig, Google.discovery);
+      const result = await request.promptAsync(Google.discovery, { showInRecents: true });
+      if (result.type === 'cancel' || result.type === 'dismiss') return;
+      if (result.type !== 'success' || !result.params?.code) {
+        throw new Error(result.error?.message || result.params?.error_description || 'Google sign-in was not completed.');
+      }
+      const token = await AuthSession.exchangeCodeAsync({
+        clientId: configuredClientId,
+        code: result.params.code,
+        redirectUri,
+        extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : undefined,
+      }, Google.discovery);
+      await handleSuccessfulAuth(token.accessToken);
     } catch (e) {
       Alert.alert('Sign-in Error', e?.message || 'Could not open Google sign-in.');
+    } finally {
+      setIsLoading(false);
     }
-  }, [request, promptAsync]);
+  }, [authConfig, handleSuccessfulAuth, redirectUri]);
 
   const signOut = useCallback(async () => {
     Alert.alert(

@@ -6,6 +6,12 @@ import { addTrip, endTrip, getTrips, getActiveTrip, deleteTrip, getDefaultBikeId
 import { useTheme } from '../context/ThemeContext';
 import { RIDE_TAGS, getTodayString, formatDate, getRideTagInfo } from '../constants';
 
+const finiteNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+const displayNumber = (value, maximumFractionDigits = 0) => finiteNumber(value).toLocaleString(undefined, { maximumFractionDigits });
+
 export default function TripScreen() {
   const { COLORS } = useTheme();
   const styles = makeStyles(COLORS);
@@ -32,22 +38,33 @@ export default function TripScreen() {
 
   const handleStartTrip = () => {
     if (!title.trim()) { Alert.alert('Required', 'Please enter a trip title.'); return; }
-    if (!startOdo || parseFloat(startOdo) <= 0) { Alert.alert('Required', 'Please enter a valid start odometer reading.'); return; }
-    addTrip({ bikeId, title: title.trim(), date: getTodayString(), startOdometer: parseFloat(startOdo), notes, rideTag });
-    setTitle(''); setStartOdo(''); setNotes(''); setRideTag('personal');
-    setShowStartModal(false);
-    loadData();
+    const startOdometer = Number(startOdo);
+    if (!Number.isFinite(startOdometer) || startOdometer < 0) { Alert.alert('Required', 'Please enter a valid start odometer reading.'); return; }
+    try {
+      addTrip({ bikeId, title: title.trim(), date: getTodayString(), startOdometer, notes, rideTag });
+      setTitle(''); setStartOdo(''); setNotes(''); setRideTag('personal');
+      setShowStartModal(false);
+      loadData();
+    } catch (_) {
+      Alert.alert('Error', 'Could not start the trip. Please try again.');
+    }
   };
 
   const handleEndTrip = () => {
-    if (!endOdo || parseFloat(endOdo) <= 0) { Alert.alert('Required', 'Please enter the end odometer reading.'); return; }
-    if (parseFloat(endOdo) <= activeTrip.start_odometer) {
+    const endOdometer = Number(endOdo);
+    const startOdometer = finiteNumber(activeTrip?.start_odometer, -1);
+    if (!Number.isFinite(endOdometer) || endOdometer < 0) { Alert.alert('Required', 'Please enter the end odometer reading.'); return; }
+    if (endOdometer <= startOdometer) {
       Alert.alert('Invalid', 'End odometer must be greater than start odometer.'); return;
     }
-    endTrip(activeTrip.id, parseFloat(endOdo));
-    setEndOdo('');
-    setShowEndModal(false);
-    loadData();
+    try {
+      endTrip(activeTrip.id, endOdometer);
+      setEndOdo('');
+      setShowEndModal(false);
+      loadData();
+    } catch (_) {
+      Alert.alert('Error', 'Could not end the trip. Please try again.');
+    }
   };
 
   const handleDelete = (id) => {
@@ -57,11 +74,13 @@ export default function TripScreen() {
     ]);
   };
 
-  const lastOdo = getLastOdometer(bikeId);
+  const lastOdo = finiteNumber(getLastOdometer(bikeId));
 
   const renderTrip = ({ item }) => {
     const tag = getRideTagInfo(item.ride_tag || 'personal');
-    const distance = item.end_odometer ? (item.end_odometer - item.start_odometer).toFixed(0) : null;
+    const startOdometer = finiteNumber(item.start_odometer);
+    const endOdometer = item.end_odometer === null || item.end_odometer === undefined ? null : finiteNumber(item.end_odometer, -1);
+    const distance = endOdometer !== null && endOdometer >= startOdometer ? (endOdometer - startOdometer).toFixed(0) : null;
     const isActive = item.status === 'active';
     return (
       <View style={[styles.tripCard, isActive && styles.tripCardActive]}>
@@ -86,12 +105,12 @@ export default function TripScreen() {
         <View style={styles.tripStats}>
           <View style={styles.tripStat}>
             <Text style={styles.tripStatLabel}>Start</Text>
-            <Text style={styles.tripStatValue}>{item.start_odometer.toLocaleString()} km</Text>
+            <Text style={styles.tripStatValue}>{displayNumber(startOdometer)} km</Text>
           </View>
           <MaterialCommunityIcons name="arrow-right" size={16} color={COLORS.textMuted} />
           <View style={styles.tripStat}>
             <Text style={styles.tripStatLabel}>End</Text>
-            <Text style={styles.tripStatValue}>{item.end_odometer ? `${item.end_odometer.toLocaleString()} km` : '—'}</Text>
+            <Text style={styles.tripStatValue}>{endOdometer !== null && endOdometer >= 0 ? `${displayNumber(endOdometer)} km` : '—'}</Text>
           </View>
           <View style={[styles.tripStat, { alignItems: 'flex-end' }]}>
             <Text style={styles.tripStatLabel}>Distance</Text>
@@ -101,19 +120,19 @@ export default function TripScreen() {
           </View>
         </View>
 
-        {!isActive && item.avg_mileage > 0 && (
+        {!isActive && finiteNumber(item.avg_mileage) > 0 && (
           <View style={styles.tripFuelStats}>
             <View style={styles.tripFuelItem}>
               <MaterialCommunityIcons name="speedometer" size={13} color={COLORS.accent} />
-              <Text style={styles.tripFuelText}>{item.avg_mileage.toFixed(1)} km/L</Text>
+              <Text style={styles.tripFuelText}>{finiteNumber(item.avg_mileage).toFixed(1)} km/L</Text>
             </View>
             <View style={styles.tripFuelItem}>
               <MaterialCommunityIcons name="water" size={13} color={COLORS.accentBlue} />
-              <Text style={styles.tripFuelText}>{item.total_fuel_litres?.toFixed(2)} L</Text>
+              <Text style={styles.tripFuelText}>{finiteNumber(item.total_fuel_litres).toFixed(2)} L</Text>
             </View>
             <View style={styles.tripFuelItem}>
               <MaterialCommunityIcons name="currency-bdt" size={13} color={COLORS.accentGreen} />
-              <Text style={styles.tripFuelText}>{item.total_fuel_cost?.toFixed(0)} tk</Text>
+              <Text style={styles.tripFuelText}>{finiteNumber(item.total_fuel_cost).toFixed(0)} tk</Text>
             </View>
           </View>
         )}
@@ -153,7 +172,7 @@ export default function TripScreen() {
         <View style={styles.activeTripBanner}>
           <MaterialCommunityIcons name="map-marker-path" size={18} color={COLORS.primary} />
           <Text style={styles.activeTripText} numberOfLines={1}>
-            Active: <Text style={{ fontWeight: '800' }}>{activeTrip.title}</Text> · {activeTrip.start_odometer.toLocaleString()} km
+            Active: <Text style={{ fontWeight: '800' }}>{activeTrip.title}</Text> · {displayNumber(activeTrip.start_odometer)} km
           </Text>
           <TouchableOpacity style={styles.endBannerBtn} onPress={() => setShowEndModal(true)}>
             <Text style={styles.endBannerBtnText}>End</Text>
@@ -222,14 +241,14 @@ export default function TripScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>End Trip</Text>
-            {activeTrip && <Text style={styles.modalSubtitle}>"{activeTrip?.title}" · Started at {activeTrip?.start_odometer?.toLocaleString()} km</Text>}
+            {activeTrip && <Text style={styles.modalSubtitle}>"{activeTrip.title}" · Started at {displayNumber(activeTrip.start_odometer)} km</Text>}
 
             <Text style={styles.inputLabel}>End Odometer (km) *</Text>
             <TextInput style={styles.input} value={endOdo} onChangeText={setEndOdo} keyboardType="decimal-pad" placeholder="e.g. 15820" placeholderTextColor={COLORS.textMuted} autoFocus />
 
-            {endOdo && activeTrip && parseFloat(endOdo) > activeTrip.start_odometer && (
+            {endOdo && activeTrip && Number.isFinite(Number(endOdo)) && Number(endOdo) > finiteNumber(activeTrip.start_odometer) && (
               <Text style={styles.distanceHint}>
-                Distance: {(parseFloat(endOdo) - activeTrip.start_odometer).toFixed(0)} km
+                Distance: {(Number(endOdo) - finiteNumber(activeTrip.start_odometer)).toFixed(0)} km
               </Text>
             )}
 

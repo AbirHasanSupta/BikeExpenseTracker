@@ -2,6 +2,16 @@ import * as SQLite from 'expo-sqlite';
 
 let _db = null;
 
+const finiteNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+const positiveNumber = (value, fallback = 0) => {
+  const number = finiteNumber(value, fallback);
+  return number > 0 ? number : fallback;
+};
+const nonNegativeNumber = (value, fallback = 0) => Math.max(0, finiteNumber(value, fallback));
+
 const getDb = () => {
   if (!_db) {
     _db = SQLite.openDatabaseSync('bike_expense.db');
@@ -116,7 +126,7 @@ export const getSettings = () => {
 export const updateSettings = (fuelPrice, currency, defaultBikeId, theme) => {
   getDb().runSync(
     'UPDATE settings SET fuel_price = ?, currency = ?, default_bike_id = ?, theme = ?',
-    [fuelPrice, currency, defaultBikeId || 1, theme || 'dark']
+    [positiveNumber(fuelPrice, 108), String(currency || 'BDT'), defaultBikeId || 1, theme === 'light' ? 'light' : 'dark']
   );
 };
 
@@ -130,7 +140,7 @@ export const getBikes = () => getDb().getAllSync('SELECT * FROM bikes ORDER BY c
 export const addBike = (bikeName, tankCapacity, notes) => {
   const result = getDb().runSync(
     'INSERT INTO bikes (bike_name, tank_capacity, notes) VALUES (?, ?, ?)',
-    [bikeName, tankCapacity, notes || '']
+    [String(bikeName || '').trim(), positiveNumber(tankCapacity, 12), notes || '']
   );
   return result.lastInsertRowId;
 };
@@ -154,7 +164,7 @@ export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odo
   const result = getDb().runSync(
     `INSERT INTO fuel_logs (bike_id, date, litres, price_per_litre, total_cost, odometer, station_name, notes, ride_tag, remaining_fuel)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [bikeId || 1, date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal', remainingFuel || 0]
+    [bikeId || 1, date, positiveNumber(litres), nonNegativeNumber(pricePerLitre), nonNegativeNumber(totalCost), nonNegativeNumber(odometer), stationName || '', notes || '', rideTag || 'personal', nonNegativeNumber(remainingFuel)]
   );
   return result.lastInsertRowId;
 };
@@ -162,7 +172,7 @@ export const addFuelLog = ({ bikeId, date, litres, pricePerLitre, totalCost, odo
 export const updateFuelLog = ({ id, date, litres, pricePerLitre, totalCost, odometer, stationName, notes, rideTag, remainingFuel }) => {
   getDb().runSync(
     `UPDATE fuel_logs SET date=?, litres=?, price_per_litre=?, total_cost=?, odometer=?, station_name=?, notes=?, ride_tag=?, remaining_fuel=? WHERE id=?`,
-    [date, litres, pricePerLitre, totalCost, odometer, stationName || '', notes || '', rideTag || 'personal', remainingFuel || 0, id]
+    [date, positiveNumber(litres), nonNegativeNumber(pricePerLitre), nonNegativeNumber(totalCost), nonNegativeNumber(odometer), stationName || '', notes || '', rideTag || 'personal', nonNegativeNumber(remainingFuel), id]
   );
 };
 
@@ -226,7 +236,7 @@ export const getStationStats = (bikeId = 1) => {
 export const addExpense = ({ bikeId, date, category, cost, notes, rideTag }) => {
   const result = getDb().runSync(
     'INSERT INTO expenses (bike_id, date, category, cost, notes, ride_tag) VALUES (?, ?, ?, ?, ?, ?)',
-    [bikeId || 1, date, category, cost, notes || '', rideTag || 'personal']
+    [bikeId || 1, date, category, positiveNumber(cost), notes || '', rideTag || 'personal']
   );
   return result.lastInsertRowId;
 };
@@ -234,7 +244,7 @@ export const addExpense = ({ bikeId, date, category, cost, notes, rideTag }) => 
 export const updateExpense = ({ id, date, category, cost, notes, rideTag }) => {
   getDb().runSync(
     `UPDATE expenses SET date=?, category=?, cost=?, notes=?, ride_tag=? WHERE id=?`,
-    [date, category, cost, notes || '', rideTag || 'personal', id]
+    [date, category, positiveNumber(cost), notes || '', rideTag || 'personal', id]
   );
 };
 
@@ -261,13 +271,13 @@ export const getServiceReminders = (bikeId = 1) => {
 export const addServiceReminder = ({ bikeId, title, intervalKm, lastServiceKm, notes }) => {
   const result = getDb().runSync(
     'INSERT INTO service_reminders (bike_id, title, interval_km, last_service_km, notes) VALUES (?, ?, ?, ?, ?)',
-    [bikeId || 1, title, intervalKm, lastServiceKm || 0, notes || '']
+    [bikeId || 1, title, positiveNumber(intervalKm), nonNegativeNumber(lastServiceKm), notes || '']
   );
   return result.lastInsertRowId;
 };
 
 export const updateReminderServiceKm = (id, newKm) => {
-  getDb().runSync('UPDATE service_reminders SET last_service_km = ? WHERE id = ?', [newKm, id]);
+  getDb().runSync('UPDATE service_reminders SET last_service_km = ? WHERE id = ?', [nonNegativeNumber(newKm), id]);
 };
 
 export const deleteServiceReminder = (id) => getDb().runSync('DELETE FROM service_reminders WHERE id = ?', [id]);
@@ -277,7 +287,7 @@ export const deleteServiceReminder = (id) => getDb().runSync('DELETE FROM servic
 export const addTrip = ({ bikeId, title, date, startOdometer, notes, rideTag }) => {
   const result = getDb().runSync(
     `INSERT INTO trips (bike_id, title, date, start_odometer, notes, ride_tag, status) VALUES (?, ?, ?, ?, ?, ?, 'active')`,
-    [bikeId || 1, title, date, startOdometer, notes || '', rideTag || 'personal']
+    [bikeId || 1, title, date, nonNegativeNumber(startOdometer), notes || '', rideTag || 'personal']
   );
   return result.lastInsertRowId;
 };
@@ -289,14 +299,19 @@ export const endTrip = (id, endOdometer) => {
 
   const now = new Date();
   const { mileage: avgMileage } = getMonthlyStats(trip.bike_id, now.getFullYear(), now.getMonth() + 1);
-  const distance = endOdometer - trip.start_odometer;
-  const fuelPrice = db.getFirstSync('SELECT fuel_price FROM settings LIMIT 1')?.fuel_price || 108;
+  const startOdometer = nonNegativeNumber(trip.start_odometer);
+  const endingOdometer = finiteNumber(endOdometer, Number.NaN);
+  if (!Number.isFinite(endingOdometer) || endingOdometer <= startOdometer) {
+    throw new Error('End odometer must be greater than the start odometer');
+  }
+  const distance = endingOdometer - startOdometer;
+  const fuelPrice = positiveNumber(db.getFirstSync('SELECT fuel_price FROM settings LIMIT 1')?.fuel_price, 108);
   const totalFuelLitres = avgMileage > 0 ? distance / avgMileage : 0;
   const totalFuelCost = totalFuelLitres * fuelPrice;
 
   db.runSync(
     `UPDATE trips SET end_odometer = ?, status = 'completed', avg_mileage = ?, total_fuel_litres = ?, total_fuel_cost = ? WHERE id = ?`,
-    [endOdometer, avgMileage, totalFuelLitres, totalFuelCost, id]
+    [endingOdometer, avgMileage, totalFuelLitres, totalFuelCost, id]
   );
 };
 
